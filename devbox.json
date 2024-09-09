@@ -1,0 +1,28 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.10.7/.schema/devbox.schema.json",
+  "packages": {
+    "rustup": "latest",
+    "openssl": {
+      "version": "latest",
+      "outputs": [
+        "dev",
+      ],
+    },
+    "pkg-config":  "latest",
+    "cargo-watch": "latest",
+  },
+  "shell": {
+    "init_hook": [
+      "projectDir=$PWD",
+      "rustupHomeDir=\"$projectDir\"/.rustup",
+      "mkdir -p $rustupHomeDir",
+      "export RUSTUP_HOME=$rustupHomeDir",
+      "export LIBRARY_PATH=$LIBRARY_PATH:\"$projectDir/nix/profile/default/lib\"",
+      "cargo fetch",
+    ],
+  },
+}
+
+// this file supports comments
+// https://github.com/jetify-com/devbox/issues/1916
+// vim: set ft=jsonc:
