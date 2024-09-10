@@ -4,5 +4,8 @@
 _default:
   @just --list --unsorted
 
+dev:
+  cargo watch -x run
+
 download-dataset:
   scripts/download-dataset

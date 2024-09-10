@@ -5,3 +5,6 @@ edition = "2021"
 
 [dependencies]
 burn = { version = "0.14.0", features = ["train", "ndarray"] }
+ndarray = "0.14"
+ndarray-linalg = { version = "0.13", features = ["openblas-static"] }
+

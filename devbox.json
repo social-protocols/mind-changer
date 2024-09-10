@@ -10,6 +10,8 @@
     },
     "pkg-config":  "latest",
     "cargo-watch": "latest",
+    "gfortran":    "latest",
+    "gcc":         "latest",
   },
   "shell": {
     "init_hook": [

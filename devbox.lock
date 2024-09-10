@@ -49,6 +49,174 @@
         }
       }
     },
+    "gcc@latest": {
+      "last_modified": "2024-08-31T10:12:23Z",
+      "resolved": "github:NixOS/nixpkgs/5629520edecb69630a3f4d17d3d33fc96c13f6fe#gcc14",
+      "source": "devbox-search",
+      "version": "14.2.0",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/f8wvhanzgn62m7hzm25d3lj3w31x23sl-gcc-wrapper-14.2.0",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/bfpzakg812g41xghc38jc8yvffa6rnr4-gcc-wrapper-14.2.0-man",
+              "default": true
+            },
+            {
+              "name": "info",
+              "path": "/nix/store/f2fckz41wnyw5qnxm9hys9idc34z3k5y-gcc-wrapper-14.2.0-info"
+            }
+          ],
+          "store_path": "/nix/store/f8wvhanzgn62m7hzm25d3lj3w31x23sl-gcc-wrapper-14.2.0"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/x19wh7l4cgdybmvz33p90nzz60bv9aww-gcc-wrapper-14.2.0",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/z1g3qrl7z4s9dz35dqgwvdl1p18zy188-gcc-wrapper-14.2.0-man",
+              "default": true
+            },
+            {
+              "name": "info",
+              "path": "/nix/store/h43w9s08kv33sfbwfa42la6949yp9978-gcc-wrapper-14.2.0-info"
+            }
+          ],
+          "store_path": "/nix/store/x19wh7l4cgdybmvz33p90nzz60bv9aww-gcc-wrapper-14.2.0"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/sw22im2rh4x3b57sk5kprxi3q89bgxzl-gcc-wrapper-14.2.0",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/bx0zccgcqjd3p1lb4m8y7jm20hc9f5dz-gcc-wrapper-14.2.0-man",
+              "default": true
+            },
+            {
+              "name": "info",
+              "path": "/nix/store/v0ms4kljn709y97ki9kh93zksqahwzhc-gcc-wrapper-14.2.0-info"
+            }
+          ],
+          "store_path": "/nix/store/sw22im2rh4x3b57sk5kprxi3q89bgxzl-gcc-wrapper-14.2.0"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/bg7ldwzfb914cwd5w92yy4bifc694ji9-gcc-wrapper-14.2.0",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/p53vzhhn5xxmkbszvq1skvd140krx0xr-gcc-wrapper-14.2.0-man",
+              "default": true
+            },
+            {
+              "name": "info",
+              "path": "/nix/store/kw4kmsw87fwkn2jczj9v9025i6cjyv0k-gcc-wrapper-14.2.0-info"
+            }
+          ],
+          "store_path": "/nix/store/bg7ldwzfb914cwd5w92yy4bifc694ji9-gcc-wrapper-14.2.0"
+        }
+      }
+    },
+    "gfortran@latest": {
+      "last_modified": "2024-08-31T10:12:23Z",
+      "resolved": "github:NixOS/nixpkgs/5629520edecb69630a3f4d17d3d33fc96c13f6fe#gfortran",
+      "source": "devbox-search",
+      "version": "13.3.0",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/h8adb3s76qs444j1jnn15cgq71vhwkwn-gfortran-wrapper-13.3.0",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/2i4k5idzpqbxbsa0qwmcl24p9k1n36b6-gfortran-wrapper-13.3.0-man",
+              "default": true
+            },
+            {
+              "name": "info",
+              "path": "/nix/store/7c4vl8kghz9m6xf3c9jndcifl1ijhd7q-gfortran-wrapper-13.3.0-info"
+            }
+          ],
+          "store_path": "/nix/store/h8adb3s76qs444j1jnn15cgq71vhwkwn-gfortran-wrapper-13.3.0"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/k7mpv08wa1klhkkx4f2q5zylqdr4xlxp-gfortran-wrapper-13.3.0",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/khv07j8pl2g5ys95vdqfa5pic1vn4bh0-gfortran-wrapper-13.3.0-man",
+              "default": true
+            },
+            {
+              "name": "info",
+              "path": "/nix/store/lfbs6m7yd2dy2x8b0jsgcg2yy6l8g4pq-gfortran-wrapper-13.3.0-info"
+            }
+          ],
+          "store_path": "/nix/store/k7mpv08wa1klhkkx4f2q5zylqdr4xlxp-gfortran-wrapper-13.3.0"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/gzwy8dwpd5z2hq6jlpmww121l0ci0s4w-gfortran-wrapper-13.3.0",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/nf1sycwnrib593gwyvw6q9xch25kgqdm-gfortran-wrapper-13.3.0-man",
+              "default": true
+            },
+            {
+              "name": "info",
+              "path": "/nix/store/n539dlvrs1zrs38v7bli9nph4dlp2qnx-gfortran-wrapper-13.3.0-info"
+            }
+          ],
+          "store_path": "/nix/store/gzwy8dwpd5z2hq6jlpmww121l0ci0s4w-gfortran-wrapper-13.3.0"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/9h90wjyfzjcmn9pkgvbsc45fh1l972gj-gfortran-wrapper-13.3.0",
+              "default": true
+            },
+            {
+              "name": "man",
+              "path": "/nix/store/sdhdim2szlin0y2qamfkmb6ygp73vbz4-gfortran-wrapper-13.3.0-man",
+              "default": true
+            },
+            {
+              "name": "info",
+              "path": "/nix/store/aaa880w61554a3fa4s863hris4kxnxll-gfortran-wrapper-13.3.0-info"
+            }
+          ],
+          "store_path": "/nix/store/9h90wjyfzjcmn9pkgvbsc45fh1l972gj-gfortran-wrapper-13.3.0"
+        }
+      }
+    },
     "openssl@latest": {
       "last_modified": "2024-09-05T11:07:25Z",
       "resolved": "github:NixOS/nixpkgs/9bb1e7571aadf31ddb4af77fc64b2d59580f9a39#openssl",
