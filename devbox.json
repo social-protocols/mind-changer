@@ -12,6 +12,7 @@
     "cargo-watch": "latest",
     "gfortran":    "latest",
     "gcc":         "latest",
+    "pv":          "latest",
   },
   "shell": {
     "init_hook": [

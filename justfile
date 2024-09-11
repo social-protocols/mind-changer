@@ -12,3 +12,9 @@ fix:
 
 download-dataset:
   scripts/download-dataset
+
+import-dataset-sqlite:
+  scripts/import-dataset-sqlite
+
+db:
+  sqlite3 dataset/ratings.db

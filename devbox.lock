@@ -425,6 +425,54 @@
         }
       }
     },
+    "pv@latest": {
+      "last_modified": "2024-08-31T10:12:23Z",
+      "resolved": "github:NixOS/nixpkgs/5629520edecb69630a3f4d17d3d33fc96c13f6fe#pv",
+      "source": "devbox-search",
+      "version": "1.8.12",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/zhjf21a4nf65faydq6bvnam2hkj3ac4r-pv-1.8.12",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/zhjf21a4nf65faydq6bvnam2hkj3ac4r-pv-1.8.12"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/1w0cz881vaaqd6f66p48lnc069fpm2zs-pv-1.8.12",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/1w0cz881vaaqd6f66p48lnc069fpm2zs-pv-1.8.12"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/w72hkr5fsa0iqrc748ivrflpwdlm6djk-pv-1.8.12",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/w72hkr5fsa0iqrc748ivrflpwdlm6djk-pv-1.8.12"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/a376g6r6qy3a3513xnmjkf6pks6ln3zc-pv-1.8.12",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/a376g6r6qy3a3513xnmjkf6pks6ln3zc-pv-1.8.12"
+        }
+      }
+    },
     "rustup@latest": {
       "last_modified": "2024-08-31T10:12:23Z",
       "plugin_version": "0.0.1",
