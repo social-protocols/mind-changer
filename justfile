@@ -7,5 +7,8 @@ _default:
 dev:
   cargo watch -x run
 
+fix:
+  cargo clippy --fix --allow-dirty
+
 download-dataset:
   scripts/download-dataset
