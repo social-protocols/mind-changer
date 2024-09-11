@@ -18,43 +18,131 @@ use ndarray::{arr2, Array1, Array2, Axis};
 
 use ndarray::*;
 use ndarray_linalg::*;
+use rustc_hash::FxHashMap;
+use serde::Deserialize;
 // use ndarray_stats::QuantileExt;
 // use statrs::distribution::{Continuous, StudentsT};
+use std::error::Error;
+use std::io;
+use std::process;
 use std::result::Result::{Err, Ok};
 
+use csv::ReaderBuilder;
 // https://burn.dev/burn-book/overview.html
 //
 
 fn print_array(array: &Array2<f64>) {
     for row in array.outer_iter() {
         for &value in row.iter() {
-            // Clamp the value between 0 and 1
-            let value = value.max(0.0).min(1.0);
+            // Clamp the value between -1.0 and 1.0
+            let value = value.max(-1.0).min(1.0);
 
-            // Convert the value to a grayscale level
-            let level = (255.0 * (1.0 - value)).round() as u8;
+            // Calculate the RGB values based on the value
+            let (r, g, b) = if value < 0.0 {
+                // Fade from yellow (255, 255, 0) to black (0, 0, 0)
+                let level = (255.0 * (-value)).round() as u8;
+                (level, level, 0)
+            } else {
+                // Fade from black (0, 0, 0) to blue (0, 0, 255)
+                let level = (255.0 * value).round() as u8;
+                (0, 0, level)
+            };
 
             // Print the block with the appropriate color
-            print!("\x1b[48;2;{};{};{}m  \x1b[0m", level, level, level);
+            print!("\x1b[48;2;{};{};{}m  \x1b[0m", r, g, b);
         }
         println!();
     }
 }
 
-fn main() {
-    let array_d2 = arr2(&[
-        [0., 0., 0., 0., 1.],
-        [1., 1., 1., 1., 0.],
-        [1., 0., 0., 0., 1.],
-        [1., 0., 1., 1., 0.],
-    ]);
+#[allow(non_snake_case, dead_code)]
+#[derive(Debug, Deserialize)]
+struct Record {
+    noteId: String,
+    raterParticipantId: String,
+    createdAtMillis: u64,
+    version: u8,
+    agree: u8,
+    disagree: u8,
+    helpful: i8,
+    notHelpful: i8,
+    helpfulnessLevel: String,
+    helpfulOther: u8,
+    helpfulInformative: u8,
+    helpfulClear: u8,
+    helpfulEmpathetic: u8,
+    helpfulGoodSources: u8,
+    helpfulUniqueContext: u8,
+    helpfulAddressesClaim: u8,
+    helpfulImportantContext: u8,
+    helpfulUnbiasedLanguage: u8,
+    notHelpfulOther: u8,
+    notHelpfulIncorrect: u8,
+    notHelpfulSourcesMissingOrUnreliable: u8,
+    notHelpfulOpinionSpeculationOrBias: u8,
+    notHelpfulMissingKeyPoints: u8,
+    notHelpfulOutdated: u8,
+    notHelpfulHardToUnderstand: u8,
+    notHelpfulArgumentativeOrBiased: u8,
+    notHelpfulOffTopic: u8,
+    notHelpfulSpamHarassmentOrAbuse: u8,
+    notHelpfulIrrelevantSources: u8,
+    notHelpfulOpinionSpeculation: u8,
+    notHelpfulNoteNotNeeded: u8,
+    ratedOnTweetId: String,
+}
 
-    let (u, sigma, v_t) = array_d2.svd(true, true).unwrap();
+fn main() -> Result<(), Box<dyn Error>> {
+    let mut rdr = ReaderBuilder::new()
+        .delimiter(b'\t')
+        .from_path("dataset/ratings-00001.tsv")?;
+    let mut note_ids = FxHashMap::default();
+    let mut rater_ids = FxHashMap::default();
+    let mut records: Vec<Record> = Vec::new();
+    let mut lineCounter = 0;
+    for result in rdr.deserialize() {
+        let record: Record = result?;
+        if record.helpful != 0 || record.notHelpful != 0 {
+            if !note_ids.contains_key(&record.noteId) {
+                note_ids.insert(record.noteId.clone(), note_ids.len());
+            }
+            if !rater_ids.contains_key(&record.raterParticipantId) {
+                rater_ids.insert(record.raterParticipantId.clone(), rater_ids.len());
+            }
+            records.push(record);
+        }
+
+        if rater_ids.len() >= 100 {
+            break;
+        }
+        lineCounter += 1;
+    }
+    println!("scanned {} lines", lineCounter);
+    println!("found {} records", records.len());
+
+    let mut matrix: Array2<f64> = Array2::zeros((note_ids.len(), rater_ids.len()));
+
+    for record in records {
+        let note_index = *note_ids.get(&record.noteId).unwrap();
+        let rater_index = *rater_ids.get(&record.raterParticipantId).unwrap();
+        matrix[[note_index, rater_index]] = (record.helpful - record.notHelpful) as f64;
+    }
+
+    print_array(&matrix);
+
+    // let array_d2 = arr2(&[
+    //     [0., 0., 0., 0., 1.],
+    //     [1., 1., 1., 1., 0.],
+    //     [1., 0., 0., 0., 1.],
+    //     [1., 0., 1., 1., 0.],
+    // ]);
+
+    let (u, sigma, v_t) = matrix.svd(true, true).unwrap();
 
     let u = u.unwrap();
     let v_t = v_t.unwrap();
     // Keep only the two largest singular values
-    let k = 2;
+    let k = 20;
     let truncated_sigma = sigma.slice(s![..k]).to_owned();
     let truncated_u = u.slice(s![.., ..k]).to_owned();
     let truncated_v_t = v_t.slice(s![..k, ..]).to_owned();
@@ -62,14 +150,12 @@ fn main() {
     // Reconstruct the matrix
     let approx = truncated_u.dot(&Array2::from_diag(&truncated_sigma).dot(&truncated_v_t));
 
-    println!("original:");
-    print_array(&array_d2);
     println!("approx:");
     print_array(&approx);
 
     // Calculate the Frobenius norm of the difference
-    let diff = &array_d2 - &approx;
-    println!("diff:");
+    let diff = &matrix - &approx;
+    println!("error:");
     print_array(&diff);
     let frobenius_norm = diff.mapv(|x| x.powi(2)).sum().sqrt();
     println!(
@@ -79,6 +165,7 @@ fn main() {
 
     // let device = burn::backend::ndarray::NdArrayDevice::Cpu;
     // run::<Autodiff<burn::backend::NdArray>>(&device);
+    Ok(())
 }
 
 fn run<B: AutodiffBackend>(device: &B::Device) {
