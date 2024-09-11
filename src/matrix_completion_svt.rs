@@ -1,7 +1,31 @@
 use ndarray::Array2;
 use ndarray_linalg::SVD;
 
-pub fn svt_algorithm(
+use std::{error::Error, time::Instant};
+
+pub fn matrix_completion_svt(m: Array2<f64>, observed: Vec<(usize, usize)>) -> Array2<f64> {
+    println!("Input matrix M shape: {:?}", m.shape());
+    println!("Number of observed entries: {}", observed.len());
+
+    let tau = 5.0;
+    let delta = 1.;
+    let max_iter = 1000;
+    let epsilon = 1e-3;
+
+    println!(
+        "svt: tau: {}, delta: {}, max_iter: {}, epsilon: {}",
+        tau, delta, max_iter, epsilon
+    );
+
+    let start = Instant::now();
+    let completed_matrix = svt_algorithm(&m, &observed, tau, delta, max_iter, epsilon);
+    let duration = start.elapsed();
+
+    println!("Algorithm execution time: {} ms", duration.as_millis());
+    completed_matrix
+}
+
+fn svt_algorithm(
     m: &Array2<f64>,
     omega: &[(usize, usize)],
     tau: f64,
@@ -16,7 +40,7 @@ pub fn svt_algorithm(
     for iter in 0..max_iter {
         let (u, s, vt) = y.svd(true, true).unwrap();
         let s = s.mapv(|x| (x - tau).max(0.0));
-        
+
         let min_dim = s.len();
         x.fill(0.0);
         for i in 0..min_dim {

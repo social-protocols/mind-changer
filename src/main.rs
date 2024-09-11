@@ -1,15 +1,15 @@
 use std::{error::Error, time::Instant};
 
 mod dataset;
+mod matrix_completion_svd;
+mod matrix_completion_svt;
 mod print_array;
-mod svt;
 
-use crate::dataset::extract_matrix_from_dataset;
-use crate::svt::svt_algorithm;
-use ndarray::arr2;
+use crate::matrix_completion_svd::matrix_completion_svd;
+use ndarray::{s, Array2};
+use std::f64;
 
 use crate::print_array::print_array;
-use ndarray::Array2;
 use rusqlite::{params, Connection, Result};
 use rustc_hash::FxHashMap;
 
@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let conn = Connection::open("dataset/ratings.db")?;
 
     let item_id = "1830786640551284814";
-    let context_size = 2;
+    let context_size = 10;
 
     let mut stmt_voters_on_note =
         conn.prepare("select raterParticipantId, createdAtMillis from ratings where noteId = ?1")?;
@@ -114,11 +114,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         item_ids.len() as f64 / user_ids.len() as f64
     );
     println!(
-        "matrix density: {}",
-        (votes_before.len() as f64 + votes_after.len() as f64)
-            / (item_ids.len() as f64 * user_ids.len() as f64)
+        "matrix density before: {}",
+        (votes_before.len() as f64) / (item_ids.len() as f64 * user_ids.len() as f64)
+    );
+    println!(
+        "matrix density after: {}",
+        (votes_after.len() as f64) / (item_ids.len() as f64 * user_ids.len() as f64)
     );
 
+    let completion_rank = 3;
+    let completion_tolerance = 1e-3;
+    let completion_max_iterations = 100;
     let mental_model_before = {
         let votes = votes_before;
         let mut matrix: Array2<f64> = Array2::from_elem((item_ids.len(), user_ids.len()), f64::NAN);
@@ -129,7 +135,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             matrix[[item_index, user_index]] = vote.value;
             observed.push((item_index, user_index));
         }
-        fill_missing_values(matrix, observed)
+        matrix_completion_svd(
+            matrix,
+            completion_rank,
+            completion_tolerance,
+            completion_max_iterations,
+        )
     };
     let mental_model_after = {
         let votes = votes_after;
@@ -141,13 +152,19 @@ fn main() -> Result<(), Box<dyn Error>> {
             matrix[[item_index, user_index]] = vote.value;
             observed.push((item_index, user_index));
         }
-        fill_missing_values(matrix, observed)
+        matrix_completion_svd(
+            matrix,
+            completion_rank,
+            completion_tolerance,
+            completion_max_iterations,
+        )
     };
 
+    let top = 20;
     println!("before");
-    print_array(&mental_model_before);
+    print_array(&mental_model_before.slice(s![..20, ..]).to_owned());
     println!("after");
-    print_array(&mental_model_after);
+    print_array(&mental_model_after.slice(s![..20, ..]).to_owned());
 
     // let matrix = arr2(&[[1., 1.], [1., f64::NAN]]);
     // let observed: Vec<(usize, usize)> = matrix
@@ -159,28 +176,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn fill_missing_values(m: Array2<f64>, observed: Vec<(usize, usize)>) -> Array2<f64> {
-    println!("Input matrix M shape: {:?}", m.shape());
-    println!("Number of observed entries: {}", observed.len());
-
-    let tau = 5.0;
-    let delta = 1.;
-    let max_iter = 1000;
-    let epsilon = 1e-3;
-
-    println!(
-        "svt: tau: {}, delta: {}, max_iter: {}, epsilon: {}",
-        tau, delta, max_iter, epsilon
-    );
-
-    let start = Instant::now();
-    let completed_matrix = svt_algorithm(&m, &observed, tau, delta, max_iter, epsilon);
-    let duration = start.elapsed();
-
-    println!("Algorithm execution time: {} ms", duration.as_millis());
-    completed_matrix
-}
-
-fn calculate_mind_change_score(noteId: String) -> f64 {
-    0.0
-}
+// fn calculate_mind_change_score(noteId: String) -> f64 {
+//     0.0
+// }
