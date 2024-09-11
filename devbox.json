@@ -21,6 +21,7 @@
       "export RUSTUP_HOME=$rustupHomeDir",
       "export LIBRARY_PATH=$LIBRARY_PATH:\"$projectDir/nix/profile/default/lib\"",
       "cargo fetch",
+      "export RUST_BACKTRACE=1",
     ],
   },
 }
