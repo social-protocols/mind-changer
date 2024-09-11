@@ -29,8 +29,8 @@ struct Vote {
 fn main() -> Result<(), Box<dyn Error>> {
     let conn = Connection::open("dataset/ratings.db")?;
 
-    let item_id = "1830786640551284814";
-    let context_size = 10;
+    let item_id = "1831373327648055733";
+    let context_size = 20;
 
     let mut stmt_voters_on_note =
         conn.prepare("select raterParticipantId, createdAtMillis from ratings where noteId = ?1")?;
@@ -103,27 +103,27 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    println!("item_id {}", item_id);
+    println!("item id: {}", item_id);
     println!("context size {}", context_size);
-    println!("Found {} votes before", votes_before.len());
-    println!("Found {} votes after", votes_after.len());
     println!("Number of unique users: {}", user_ids.len());
     println!("Number of unique items: {}", item_ids.len());
     println!(
         "items/user: {}",
         item_ids.len() as f64 / user_ids.len() as f64
     );
+    println!("votes before: {}", votes_before.len());
+    println!("votes after:  {} ", votes_after.len());
     println!(
         "matrix density before: {}",
         (votes_before.len() as f64) / (item_ids.len() as f64 * user_ids.len() as f64)
     );
     println!(
-        "matrix density after: {}",
+        "matrix density after:  {}",
         (votes_after.len() as f64) / (item_ids.len() as f64 * user_ids.len() as f64)
     );
 
     let completion_rank = 3;
-    let completion_tolerance = 1e-3;
+    let completion_tolerance = 1e-4;
     let completion_max_iterations = 100;
     let mental_model_before = {
         let votes = votes_before;
@@ -162,9 +162,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let top = 20;
     println!("before");
-    print_array(&mental_model_before.slice(s![..20, ..]).to_owned());
+    print_array(&mental_model_before.slice(s![..top, ..]).to_owned());
     println!("after");
-    print_array(&mental_model_after.slice(s![..20, ..]).to_owned());
+    print_array(&mental_model_after.slice(s![..top, ..]).to_owned());
 
     // let matrix = arr2(&[[1., 1.], [1., f64::NAN]]);
     // let observed: Vec<(usize, usize)> = matrix
