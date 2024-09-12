@@ -1,4 +1,4 @@
-use std::{error::Error, time::Instant};
+use std::error::Error;
 
 mod dataset;
 mod matrix_completion_svd;
@@ -6,7 +6,7 @@ mod matrix_completion_svt;
 mod print_array;
 
 use crate::matrix_completion_svd::matrix_completion_svd;
-use ndarray::{s, Array2};
+use ndarray::{s, Array2, Zip};
 use std::f64;
 
 use crate::print_array::print_array;
@@ -34,6 +34,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut stmt_voters_on_note =
         conn.prepare("select raterParticipantId, createdAtMillis from ratings where noteId = ?1")?;
+    // TODO: filter users with only one vote
     let mut stmt_votes_before =
         conn.prepare("select noteId, helpfulnessLevel from ratings where raterParticipantId = ?1 and createdAtMillis < ?2 order by createdAtMillis desc limit ?3;")?;
     let mut stmt_votes_after =
@@ -123,59 +124,71 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     let completion_rank = 3;
-    let completion_tolerance = 1e-4;
-    let completion_max_iterations = 100;
-    let mental_model_before = {
+    let completion_tolerance = 1e-3;
+    let completion_max_iterations = 100; // Limit max_iterations to 2 for debugging
+    let _completion_lambda = 0.1; // Prefix with underscore to indicate intentional non-use
+    let (observed_matrix_before, mental_model_before) = {
         let votes = votes_before;
-        let mut matrix: Array2<f64> = Array2::from_elem((item_ids.len(), user_ids.len()), f64::NAN);
-        let mut observed: Vec<(usize, usize)> = vec![];
+        let mut observed_matrix: Array2<f64> =
+            Array2::from_elem((item_ids.len(), user_ids.len()), f64::NAN);
         for vote in votes {
             let item_index = *item_ids.get(&vote.item_id).unwrap();
             let user_index = *user_ids.get(&vote.user_id).unwrap();
-            matrix[[item_index, user_index]] = vote.value;
-            observed.push((item_index, user_index));
+            observed_matrix[[item_index, user_index]] = vote.value;
         }
-        matrix_completion_svd(
-            matrix,
+
+        let mental_model = matrix_completion_svd(
+            observed_matrix.clone(),
             completion_rank,
             completion_tolerance,
             completion_max_iterations,
-        )
-    };
-    let mental_model_after = {
-        let votes = votes_after;
-        let mut matrix: Array2<f64> = Array2::from_elem((item_ids.len(), user_ids.len()), f64::NAN);
-        let mut observed: Vec<(usize, usize)> = vec![];
-        for vote in votes {
-            let item_index = *item_ids.get(&vote.item_id).unwrap();
-            let user_index = *user_ids.get(&vote.user_id).unwrap();
-            matrix[[item_index, user_index]] = vote.value;
-            observed.push((item_index, user_index));
-        }
-        matrix_completion_svd(
-            matrix,
-            completion_rank,
-            completion_tolerance,
-            completion_max_iterations,
-        )
+            None,
+        );
+        (observed_matrix, mental_model)
     };
 
-    let top = 20;
-    println!("before");
+    let (observed_matrix_after, mental_model_after) = {
+        let votes = votes_after;
+        let mut observed_matrix: Array2<f64> =
+            Array2::from_elem((item_ids.len(), user_ids.len()), f64::NAN);
+        let mut initial_guess = mental_model_before.clone();
+        for vote in votes {
+            let item_index = *item_ids.get(&vote.item_id).unwrap();
+            let user_index = *user_ids.get(&vote.user_id).unwrap();
+            observed_matrix[[item_index, user_index]] = vote.value;
+            initial_guess[[item_index, user_index]] = vote.value; // Update initial_guess with observed values
+        }
+        let mental_model = matrix_completion_svd(
+            observed_matrix.clone(),
+            completion_rank,
+            completion_tolerance,
+            completion_max_iterations,
+            Some(mental_model_before.clone()),
+        );
+        (observed_matrix, mental_model)
+    };
+
+    let top = 30;
+    println!("Observed matrix before voting:");
+    print_array(&observed_matrix_before.slice(s![..top, ..]).to_owned());
+
+    println!("Observed matrix after voting:");
+    print_array(&observed_matrix_after.slice(s![..top, ..]).to_owned());
+
+    println!("Mental model before:");
     print_array(&mental_model_before.slice(s![..top, ..]).to_owned());
-    println!("after");
+    println!("Mental model after:");
     print_array(&mental_model_after.slice(s![..top, ..]).to_owned());
 
-    // let matrix = arr2(&[[1., 1.], [1., f64::NAN]]);
-    // let observed: Vec<(usize, usize)> = matrix
-    //     .indexed_iter()
-    //     .filter(|&(_, &value)| !value.is_nan())
-    //     .map(|((i, j), _)| (i, j))
-    //     .collect();
-    // fill_missing_values(matrix, observed);
+    let rmse = root_mean_square_error(&mental_model_before, &mental_model_after);
+    println!("RMSE: {}", rmse);
+
     Ok(())
 }
 
-// fn calculate_mind_change_score(noteId: String) -> f64 {
-//     0.0
-// }
+fn root_mean_square_error(matrix1: &Array2<f64>, matrix2: &Array2<f64>) -> f64 {
+    let diff = Zip::from(matrix1)
+        .and(matrix2)
+        .fold(0.0, |acc, &a, &b| acc + (a - b).powi(2));
+    (diff / (matrix1.len() as f64)).sqrt()
+}
