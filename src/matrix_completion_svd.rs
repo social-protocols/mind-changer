@@ -2,8 +2,6 @@ use ndarray::{s, Array2};
 use ndarray_linalg::SVD;
 use std::time::Instant;
 
-use crate::print_array;
-
 /// Performs matrix completion using Singular Value Decomposition (SVD).
 ///
 /// This algorithm completes a matrix with missing values by iteratively applying SVD
@@ -40,11 +38,6 @@ pub fn matrix_completion_svd(
         Some(guess) => guess,
         None => calculate_initial_guess(&incomplete_matrix),
     };
-
-    // Print the first rows of the initial guess
-    // Print the initial guess for the completed matrix
-    // This is useful for debugging and understanding the starting point
-    print_array(&completed_matrix.slice(s![..30, ..]).to_owned());
 
     // Iterate to refine the matrix completion
     for iteration in 0..max_iterations {

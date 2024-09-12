@@ -3,6 +3,10 @@ use ndarray::Array2;
 pub fn print_array(array: &Array2<f64>) {
     for row in array.outer_iter() {
         for &value in row.iter() {
+            if value.is_nan() {
+                print!("\x1b[48;2;{};{};{}m  \x1b[0m", 128, 128, 128);
+                continue;
+            }
             // Clamp the value between -1.0 and 1.0
             let value = value.clamp(-1.0, 1.0);
 

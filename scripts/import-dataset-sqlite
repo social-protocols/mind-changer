@@ -59,6 +59,11 @@ CREATE TABLE ratings (
     ratedOnTweetId INTEGER
 ) strict;
 
+create table scores (
+  noteid integer primary key,
+  change real not null
+) strict;
+
 .mode tabs
 .import --skip 1 /dev/stdin ratings
 
