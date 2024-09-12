@@ -1,6 +1,5 @@
 use std::error::Error;
 
-mod dataset;
 mod matrix_completion_svd;
 mod matrix_completion_svt;
 mod print_array;
