@@ -1,7 +1,6 @@
 use std::error::Error;
 
 mod matrix_completion_svd;
-mod matrix_completion_svt;
 mod print_array;
 
 use crate::matrix_completion_svd::matrix_completion_svd;
