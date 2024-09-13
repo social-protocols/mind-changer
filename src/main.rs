@@ -29,18 +29,36 @@ struct Vote {
     value: f64,
 }
 
+const CONTEXT_SIZE: i32 = 500;
+
 fn main() -> Result<(), Box<dyn Error>> {
     let conn = Connection::open("dataset/ratings.db")?;
 
+    conn.execute("delete from scores", ())?;
     let mut stmt_note_ids =
         conn.prepare("select distinct noteId from ratings order by createdAtMillis asc")?;
-    let item_iter = stmt_note_ids.query_map(params![], |row| Ok(Item { id: row.get(0)? }))?;
+    let item_count: i64 = conn
+        .prepare("select count(distinct noteId) from ratings")?
+        .query_map(params![], |row| Ok(row.get::<_, i64>(0)?))?
+        .next()
+        .unwrap()?;
+    let item_iter = stmt_note_ids.query_map(params![], |row| {
+        Ok(Item {
+            id: row.get::<_, i64>(0)?,
+        })
+    })?;
 
-    for item in item_iter {
+    for (i, item) in item_iter.enumerate() {
         let item = item?;
         // let item = Item {
         //     id: 1360871260054503427,
         // };
+        println!(
+            "\n[Item {}/{} {:.4}%]",
+            i,
+            item_count,
+            i as f64 / item_count as f64
+        );
         match process_item(item.id.to_string().as_str(), &conn) {
             Ok(_) => {}
             Err(err) => println!("Error: {}", err),
@@ -53,15 +71,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn process_item(item_id: &str, conn: &Connection) -> Result<(), Box<dyn Error>> {
     let score = calculate_change_of_mind(item_id, &conn)?;
     println!("item: {}, change-of-mind: {}", item_id, score);
-    conn.execute(
-        "insert or replace into scores (noteId, change) values (?1, ?2)",
-        (item_id, score),
-    )?;
+    if (score != -1.0) {
+        conn.execute(
+            "insert or replace into scores (noteId, change) values (?1, ?2)",
+            (item_id, score),
+        )?;
+    }
     Ok(())
 }
 
 fn calculate_change_of_mind(item_id: &str, conn: &Connection) -> Result<f64, Box<dyn Error>> {
-    let context_size = 20;
+    let context_size = CONTEXT_SIZE;
     let mut stmt_voters_on_note =
         conn.prepare("select raterParticipantId, createdAtMillis from ratings where noteId = ?1")?;
     // TODO: filter users/items with only one vote
@@ -158,10 +178,9 @@ fn calculate_change_of_mind(item_id: &str, conn: &Connection) -> Result<f64, Box
         return Ok(-1.0);
     }
 
-    let completion_rank = 3;
-    let completion_tolerance = 0.01;
-    let completion_max_iterations = 100; // Limit max_iterations to 2 for debugging
-    let _completion_lambda = 0.1; // Prefix with underscore to indicate intentional non-use
+    let completion_rank = 2;
+    let completion_tolerance = 0.001;
+    let completion_max_iterations = 500; // Limit max_iterations to 2 for debugging
     let (observed_matrix_before, mental_model_before) = {
         let votes = votes_before;
         let mut observed_matrix: Array2<f64> =
@@ -201,7 +220,7 @@ fn calculate_change_of_mind(item_id: &str, conn: &Connection) -> Result<f64, Box
         (observed_matrix, mental_model)
     };
 
-    let top = 300.min(item_ids.len());
+    let top = 50.min(item_ids.len());
     println!("Observed matrix before voting:");
     print_array(&observed_matrix_before.slice(s![..top, ..]).to_owned());
 
@@ -219,8 +238,8 @@ fn calculate_change_of_mind(item_id: &str, conn: &Connection) -> Result<f64, Box
             .to_owned(),
     );
 
-    let rmse = root_mean_square_error(&mental_model_before, &mental_model_after);
-    println!("RMSE: {}", rmse);
+    let rmse = root_mean_square_error(&mental_model_before, &mental_model_after) / 2.0; // range is from 0 to 2
+    println!("mind change: {}", rmse);
 
     Ok(rmse)
 }
