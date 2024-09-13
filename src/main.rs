@@ -39,8 +39,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let conn = Connection::open("dataset/ratings.db")?;
 
     conn.execute("delete from scores", ())?;
+    //  where noteId = '1400247230330667008'
     let mut stmt_note_ids =
-        conn.prepare("select distinct noteId from ratings where noteId = '1354855483631423493' order by createdAtMillis asc")?;
+        conn.prepare("select distinct noteId from ratings order by createdAtMillis asc")?;
     let item_count: i64 = conn
         .prepare("select count(distinct noteId) from ratings")?
         .query_map(params![], |row| Ok(row.get::<_, i64>(0)?))?
@@ -172,7 +173,6 @@ fn calculate_change_of_mind(item_id: &str, conn: &Connection) -> Result<f64, Box
         return Ok(-1.0);
     }
 
-
     let observed_matrix_before = compute_observed_matrix(&votes_before, &item_ids, &user_ids);
     let observed_matrix_after = compute_observed_matrix(&votes_after, &item_ids, &user_ids);
 
@@ -192,7 +192,7 @@ fn calculate_change_of_mind(item_id: &str, conn: &Connection) -> Result<f64, Box
         Some(&mental_model_before),
     );
 
-    let top = 50.min(item_ids.len());
+    let top = 5.min(item_ids.len());
     println!("Observed matrix before voting:");
     print_array(&observed_matrix_before.slice(s![..top, ..]).to_owned());
 
