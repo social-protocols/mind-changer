@@ -31,6 +31,10 @@ struct Vote {
 
 const CONTEXT_SIZE: i32 = 500;
 
+const COMPLETION_RANK: usize = 4;
+const COMPLETION_TOLERANCE: f64 = 0.001;
+const COMPLETION_MAX_ITERATIONS: usize = 500; // LIMIT MAX_ITERATIONS TO 2 FOR DEBUGGING
+
 fn main() -> Result<(), Box<dyn Error>> {
     let conn = Connection::open("dataset/ratings.db")?;
 
@@ -168,26 +172,23 @@ fn calculate_change_of_mind(item_id: &str, conn: &Connection) -> Result<f64, Box
         return Ok(-1.0);
     }
 
-    let completion_rank = 4;
-    let completion_tolerance = 0.001;
-    let completion_max_iterations = 500; // Limit max_iterations to 2 for debugging
 
     let observed_matrix_before = compute_observed_matrix(&votes_before, &item_ids, &user_ids);
     let observed_matrix_after = compute_observed_matrix(&votes_after, &item_ids, &user_ids);
 
     let mental_model_before = compute_mental_model(
         &observed_matrix_before,
-        completion_rank,
-        completion_tolerance,
-        completion_max_iterations,
+        COMPLETION_RANK,
+        COMPLETION_TOLERANCE,
+        COMPLETION_MAX_ITERATIONS,
         None,
     );
 
     let mental_model_after = compute_mental_model(
         &observed_matrix_after,
-        completion_rank,
-        completion_tolerance,
-        completion_max_iterations,
+        COMPLETION_RANK,
+        COMPLETION_TOLERANCE,
+        COMPLETION_MAX_ITERATIONS,
         Some(&mental_model_before),
     );
 
