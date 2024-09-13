@@ -52,6 +52,13 @@ create table scores (
   noteid integer primary key,
   change real not null
 ) strict;
+
+create table user_change (
+  noteid integer not null,
+  userid text not null,
+  change real not null,
+  primary key(noteid, userid)
+) strict;
 EOF
 )
 

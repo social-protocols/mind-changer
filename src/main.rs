@@ -5,7 +5,7 @@ mod matrix_completion_svd;
 mod print_array;
 
 use crate::matrix_completion_svd::matrix_completion_svd;
-use ndarray::{s, Array2, Zip};
+use ndarray::{s, Array2, Axis, Zip};
 use std::f64;
 
 use crate::print_array::print_array;
@@ -223,23 +223,46 @@ fn process_item(item_id: &str, conn: &Connection) -> Result<(), Box<dyn Error>> 
     println!("Mental model after:");
     print_array(&mental_model_after.slice(s![..top, ..]).to_owned());
     println!("Mental model diff:");
+    let diff_matrix = mental_model_after.clone() - mental_model_before.clone();
+    print_array(&diff_matrix.slice(s![..top, ..]).to_owned());
+
+    // Calculate the sum of the absolute values of each column (user) in the difference matrix
+    let column_sums = diff_matrix.mapv(|x| x.abs()).sum_axis(Axis(0));
+
+    // Calculate the mean of the column sums per user
+    let mean_column_sum_per_user = column_sums / diff_matrix.nrows() as f64;
+
+    println!("Mean of column sums per user in the difference matrix:");
     print_array(
-        &(mental_model_after.clone() - mental_model_before.clone())
-            .slice(s![..top, ..])
-            .to_owned(),
+        &mean_column_sum_per_user
+            .clone()
+            .into_shape((1, user_ids.len()))
+            .unwrap(),
     );
+
+    // Create a reverse map for user_ids
+    let reverse_user_ids: FxHashMap<usize, String> =
+        user_ids.iter().map(|(k, v)| (*v, k.clone())).collect();
+
+    // Prepare the SQL statement
+    let mut stmt = conn.prepare(
+        "INSERT OR REPLACE INTO user_change (noteid, userid, change) VALUES (?1, ?2, ?3)",
+    )?;
+
+    // Loop over mean_column_sum_per_user and insert into database
+    for (index, &change) in mean_column_sum_per_user.iter().enumerate() {
+        let user_id = reverse_user_ids.get(&index).unwrap();
+        stmt.execute(params![item_id, user_id, change])?;
+    }
 
     let rmse = root_mean_square_error(&mental_model_before, &mental_model_after); // range is from 0 to 2
 
     let mind_change = rmse / 2.0;
-    println!("mind change: {}", mind_change);
-    println!("item: {}, change-of-mind: {}", item_id, mind_change);
-    if mind_change != -1.0 {
-        conn.execute(
-            "insert or replace into scores (noteId, change) values (?1, ?2)",
-            (item_id, mind_change),
-        )?;
-    }
+    println!("average mind change: {}", mind_change);
+    conn.execute(
+        "insert or replace into scores (noteId, change) values (?1, ?2)",
+        (item_id, mind_change),
+    )?;
     Ok(())
 }
 
