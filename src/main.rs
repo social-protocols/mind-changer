@@ -185,12 +185,20 @@ fn calculate_change_of_mind(item_id: &str, conn: &Connection) -> Result<f64, Box
     let observed_matrix_before = compute_observed_matrix(&votes_before, &item_ids, &user_ids);
     let observed_matrix_after = compute_observed_matrix(&votes_after, &item_ids, &user_ids);
 
+    // just for initializing the guess.
+    let mental_model_after_tmp = compute_mental_model(
+        &observed_matrix_after,
+        COMPLETION_RANK,
+        COMPLETION_TOLERANCE,
+        COMPLETION_MAX_ITERATIONS,
+        None,
+    );
     let mental_model_before = compute_mental_model(
         &observed_matrix_before,
         COMPLETION_RANK,
         COMPLETION_TOLERANCE,
         COMPLETION_MAX_ITERATIONS,
-        None,
+        Some(&mental_model_after_tmp),
     );
 
     let mental_model_after = compute_mental_model(
