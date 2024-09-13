@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     conn.execute("delete from scores", ())?;
     let mut stmt_note_ids =
-        conn.prepare("select distinct noteId from ratings order by createdAtMillis asc")?;
+        conn.prepare("select distinct noteId from ratings where noteId = '1354855483631423493' order by createdAtMillis asc")?;
     let item_count: i64 = conn
         .prepare("select count(distinct noteId) from ratings")?
         .query_map(params![], |row| Ok(row.get::<_, i64>(0)?))?
@@ -71,7 +71,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn process_item(item_id: &str, conn: &Connection) -> Result<(), Box<dyn Error>> {
     let score = calculate_change_of_mind(item_id, &conn)?;
     println!("item: {}, change-of-mind: {}", item_id, score);
-    if (score != -1.0) {
+    if score != -1.0 {
         conn.execute(
             "insert or replace into scores (noteId, change) values (?1, ?2)",
             (item_id, score),
@@ -168,7 +168,7 @@ fn calculate_change_of_mind(item_id: &str, conn: &Connection) -> Result<f64, Box
         return Ok(-1.0);
     }
 
-    let completion_rank = 2;
+    let completion_rank = 4;
     let completion_tolerance = 0.001;
     let completion_max_iterations = 500; // Limit max_iterations to 2 for debugging
     let (observed_matrix_before, mental_model_before) = {
