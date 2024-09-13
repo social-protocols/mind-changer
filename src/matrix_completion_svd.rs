@@ -1,4 +1,4 @@
-use ndarray::{s, Array2};
+use ndarray::{s, Array1, Array2};
 use ndarray_linalg::SVD;
 use std::time::Instant;
 
@@ -20,7 +20,7 @@ use crate::initial_guess::calculate_initial_guess;
 /// The completed matrix with estimated values for previously missing entries
 pub fn matrix_completion_svd(
     incomplete_matrix: Array2<f64>,
-    target_rank: usize,
+    energy_threshold: f64,
     convergence_tolerance: f64,
     max_iterations: usize,
     initial_guess: Option<Array2<f64>>,
@@ -34,25 +34,29 @@ pub fn matrix_completion_svd(
     let mut actual_iterations = 0;
     let mut last_frobenius_norm_difference = 0.0;
     for iteration in 0..max_iterations {
+        // println!("{}", iteration);
+        // print_array(&completed_matrix.slice(s![..20, ..]).to_owned());
+        // thread::sleep(Duration::from_secs(1));
+
         actual_iterations = iteration + 1;
         // Perform SVD on the current completed matrix
         let svd = completed_matrix.svd(true, true).unwrap();
         let (left_singular_vectors, singular_values, right_singular_vectors_t) =
             (svd.0.unwrap(), svd.1, svd.2.unwrap());
 
+        // Determine the adaptive rank based on cumulative singular values
+        let adaptive_rank = calculate_rank_from_singular_values(&singular_values, energy_threshold);
+
         // Store the current matrix for comparison
         let previous_matrix = completed_matrix.clone();
 
-        // Determine the effective rank (minimum of target_rank and matrix dimensions)
-        let effective_rank = target_rank.min(completed_matrix.nrows()).min(completed_matrix.ncols());
-
         // Compute the low-rank approximation
         completed_matrix = left_singular_vectors
-            .slice(s![.., ..effective_rank])
+            .slice(s![.., ..adaptive_rank])
             .dot(&Array2::from_diag(
-                &singular_values.slice(s![..effective_rank]),
+                &singular_values.slice(s![..adaptive_rank]),
             ))
-            .dot(&right_singular_vectors_t.slice(s![..effective_rank, ..]));
+            .dot(&right_singular_vectors_t.slice(s![..adaptive_rank, ..]));
 
         // Update only the missing values in the original matrix
         completed_matrix.zip_mut_with(&incomplete_matrix, |completed_value, &original_value| {
@@ -64,6 +68,10 @@ pub fn matrix_completion_svd(
         // Check for convergence using Frobenius norm
         let matrix_difference = &completed_matrix - &previous_matrix;
         last_frobenius_norm_difference = matrix_difference.mapv(|x| x * x).sum().sqrt();
+        // println!(
+        //     "[{}] rank {}: {}",
+        //     iteration, adaptive_rank, last_frobenius_norm_difference
+        // );
 
         if last_frobenius_norm_difference < convergence_tolerance {
             break;
@@ -77,4 +85,19 @@ pub fn matrix_completion_svd(
         last_frobenius_norm_difference
     );
     completed_matrix
+}
+
+fn calculate_rank_from_singular_values(
+    singular_values: &Array1<f64>,
+    energy_threshold: f64,
+) -> usize {
+    let total_energy: f64 = singular_values.iter().map(|&x| x * x).sum();
+    let mut cumulative_energy = 0.0;
+    for (i, &value) in singular_values.iter().enumerate() {
+        cumulative_energy += value * value;
+        if cumulative_energy / total_energy >= energy_threshold {
+            return i + 1;
+        }
+    }
+    singular_values.len()
 }

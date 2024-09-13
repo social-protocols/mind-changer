@@ -30,8 +30,8 @@ struct Vote {
     value: f64,
 }
 
-const CONTEXT_SIZE: i32 = 5; // other votes from user before and after voting on target post
-const COMPLETION_RANK: usize = 4;
+const CONTEXT_SIZE: i32 = 20; // other votes from user before and after voting on target post
+const COMPLETION_ENERGY_THRESHOLD: f64 = 0.99; // for adaptive rank selection
 const COMPLETION_TOLERANCE: f64 = 0.01;
 const COMPLETION_MAX_ITERATIONS: usize = 300;
 
@@ -41,6 +41,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     conn.execute("delete from scores", ())?;
     conn.execute("delete from user_change", ())?;
     //  where noteId = '1400247230330667008'
+    //   where noteId = '1354864556552712194'
     let mut stmt_note_ids = conn.prepare("select distinct noteId from ratings")?;
     let item_count: i64 = conn
         .prepare("select count(distinct noteId) from ratings")?
@@ -182,7 +183,7 @@ fn process_item(item_id: &str, conn: &Connection) -> Result<(), Box<dyn Error>> 
         let observed_matrix = &observed_matrix_after;
         matrix_completion_svd(
             observed_matrix.clone(),
-            COMPLETION_RANK,
+            COMPLETION_ENERGY_THRESHOLD,
             COMPLETION_TOLERANCE,
             COMPLETION_MAX_ITERATIONS,
             None,
@@ -193,7 +194,7 @@ fn process_item(item_id: &str, conn: &Connection) -> Result<(), Box<dyn Error>> 
         let initial_guess = Some(&mental_model_after_tmp);
         matrix_completion_svd(
             observed_matrix.clone(),
-            COMPLETION_RANK,
+            COMPLETION_ENERGY_THRESHOLD,
             COMPLETION_TOLERANCE,
             COMPLETION_MAX_ITERATIONS,
             initial_guess.cloned(),
@@ -205,7 +206,7 @@ fn process_item(item_id: &str, conn: &Connection) -> Result<(), Box<dyn Error>> 
         let initial_guess = Some(&mental_model_before);
         matrix_completion_svd(
             observed_matrix.clone(),
-            COMPLETION_RANK,
+            COMPLETION_ENERGY_THRESHOLD,
             COMPLETION_TOLERANCE,
             COMPLETION_MAX_ITERATIONS,
             initial_guess.cloned(),
