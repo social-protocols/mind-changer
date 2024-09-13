@@ -40,8 +40,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     conn.execute("delete from scores", ())?;
     //  where noteId = '1400247230330667008'
-    let mut stmt_note_ids =
-        conn.prepare("select distinct noteId from ratings order by createdAtMillis asc")?;
+    let mut stmt_note_ids = conn.prepare("select distinct noteId from ratings")?;
     let item_count: i64 = conn
         .prepare("select count(distinct noteId) from ratings")?
         .query_map(params![], |row| Ok(row.get::<_, i64>(0)?))?
