@@ -2,6 +2,8 @@ use ndarray::{s, Array2};
 use ndarray_linalg::SVD;
 use std::time::Instant;
 
+use crate::initial_guess::calculate_initial_guess;
+
 /// Performs matrix completion using Singular Value Decomposition (SVD).
 ///
 /// This algorithm completes a matrix with missing values by iteratively applying SVD
@@ -44,17 +46,18 @@ pub fn matrix_completion_svd(
         // println!("Iteration {}", iteration + 1);
 
         // Perform Singular Value Decomposition (SVD)
-        // Perform Singular Value Decomposition (SVD)
         // Decompose the matrix into U, S, and V^T
-        let (u, s, vt) = completed_matrix.svd(true, true).unwrap();
+        let svd = completed_matrix.svd(true, true).unwrap();
+        let u = svd.0.unwrap();
+        let s = svd.1;
+        let vt = svd.2.unwrap();
 
         // Reconstruct the matrix using only the top 'rank' singular values
         // This creates a low-rank approximation of the matrix
         let low_rank_approximation = u
-            .unwrap()
             .slice(s![.., ..rank])
             .dot(&Array2::from_diag(&s.slice(s![..rank])))
-            .dot(&vt.unwrap().slice(s![..rank, ..]));
+            .dot(&vt.slice(s![..rank, ..]));
 
         // Calculate the difference between the low-rank approximation and the current matrix
         let diff = &low_rank_approximation - &completed_matrix;
@@ -92,54 +95,5 @@ pub fn matrix_completion_svd(
 
     // Print the total execution time for performance analysis
     println!("Total execution time: {:?}", start_time.elapsed());
-    completed_matrix
-}
-
-fn calculate_initial_guess(incomplete_matrix: &Array2<f64>) -> Array2<f64> {
-    let (rows, cols) = incomplete_matrix.dim();
-
-    // Calculate row averages
-    let row_averages: Vec<f64> = (0..rows)
-        .map(|i| {
-            let row = incomplete_matrix.row(i);
-            let known_values: Vec<f64> = row.iter().filter(|&&x| !x.is_nan()).cloned().collect();
-            if known_values.is_empty() {
-                f64::NAN
-            } else {
-                known_values.iter().sum::<f64>() / known_values.len() as f64
-            }
-        })
-        .collect();
-
-    // Calculate column averages
-    let col_averages: Vec<f64> = (0..cols)
-        .map(|j| {
-            let col = incomplete_matrix.column(j);
-            let known_values: Vec<f64> = col.iter().filter(|&&x| !x.is_nan()).cloned().collect();
-            if known_values.is_empty() {
-                f64::NAN
-            } else {
-                known_values.iter().sum::<f64>() / known_values.len() as f64
-            }
-        })
-        .collect();
-
-    // Calculate global average
-    let global_average = row_averages.iter().filter(|&&x| !x.is_nan()).sum::<f64>()
-        / row_averages.iter().filter(|&&x| !x.is_nan()).count() as f64;
-
-    let mut completed_matrix = incomplete_matrix.clone();
-    for ((i, j), value) in completed_matrix.indexed_iter_mut() {
-        if value.is_nan() {
-            *value = if !row_averages[i].is_nan() {
-                row_averages[i]
-            } else if !col_averages[j].is_nan() {
-                col_averages[j]
-            } else {
-                global_average
-            };
-        }
-    }
-
     completed_matrix
 }

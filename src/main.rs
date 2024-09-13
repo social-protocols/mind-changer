@@ -1,5 +1,6 @@
 use std::error::Error;
 
+mod initial_guess;
 mod matrix_completion_svd;
 mod print_array;
 
@@ -30,7 +31,6 @@ struct Vote {
 }
 
 const CONTEXT_SIZE: i32 = 500;
-
 const COMPLETION_RANK: usize = 4;
 const COMPLETION_TOLERANCE: f64 = 0.001;
 const COMPLETION_MAX_ITERATIONS: usize = 500; // LIMIT MAX_ITERATIONS TO 2 FOR DEBUGGING
