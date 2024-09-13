@@ -86,9 +86,9 @@ fn calculate_change_of_mind(item_id: &str, conn: &Connection) -> Result<f64, Box
         conn.prepare("select raterParticipantId, createdAtMillis from ratings where noteId = ?1")?;
     // TODO: filter users/items with only one vote
     let mut stmt_votes_before =
-        conn.prepare("select noteId, helpfulnessLevel from ratings where raterParticipantId = ?1 and createdAtMillis < ?2 and helpfulnesslevel != '' order by createdAtMillis desc limit ?3;")?;
+        conn.prepare("select noteId, agree - disagree from ratings where raterParticipantId = ?1 and createdAtMillis < ?2 and agree + disagree != 0 order by createdAtMillis desc limit ?3;")?;
     let mut stmt_votes_after =
-        conn.prepare("select noteId, helpfulnessLevel from ratings where raterParticipantId = ?1 and createdAtMillis > ?2 and helpfulnesslevel != '' order by createdAtMillis asc limit ?3;")?;
+        conn.prepare("select noteId, agree - disagree from ratings where raterParticipantId = ?1 and createdAtMillis > ?2 and agree + disagree != 0 order by createdAtMillis asc limit ?3;")?;
 
     let user_iter = stmt_voters_on_note.query_map(params![item_id], |row| {
         Ok(User {
@@ -114,12 +114,7 @@ fn calculate_change_of_mind(item_id: &str, conn: &Connection) -> Result<f64, Box
                 Ok(Vote {
                     user_id: user.id.clone(),
                     item_id: row.get(0)?,
-                    value: match row.get::<_, String>(1)?.as_str() {
-                        "HELPFUL" => 1.0,
-                        "SOMEWHAT_HELPFUL" => 0.0,
-                        "NOT_HELPFUL" => -1.0,
-                        _ => panic!(),
-                    },
+                    value: row.get(1)?,
                 })
             },
         )?;
@@ -136,12 +131,7 @@ fn calculate_change_of_mind(item_id: &str, conn: &Connection) -> Result<f64, Box
                 Ok(Vote {
                     user_id: user.id.clone(),
                     item_id: row.get(0)?,
-                    value: match row.get::<_, String>(1)?.as_str() {
-                        "HELPFUL" => 1.0,
-                        "SOMEWHAT_HELPFUL" => 0.0,
-                        "NOT_HELPFUL" => -1.0,
-                        _ => panic!(),
-                    },
+                    value: row.get(1)?,
                 })
             },
         )?;
