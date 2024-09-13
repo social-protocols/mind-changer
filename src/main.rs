@@ -171,44 +171,25 @@ fn calculate_change_of_mind(item_id: &str, conn: &Connection) -> Result<f64, Box
     let completion_rank = 4;
     let completion_tolerance = 0.001;
     let completion_max_iterations = 500; // Limit max_iterations to 2 for debugging
-    let (observed_matrix_before, mental_model_before) = {
-        let votes = votes_before;
-        let mut observed_matrix: Array2<f64> =
-            Array2::from_elem((item_ids.len(), user_ids.len()), f64::NAN);
-        for vote in votes {
-            let item_index = *item_ids.get(&vote.item_id).unwrap();
-            let user_index = *user_ids.get(&vote.user_id).unwrap();
-            observed_matrix[[item_index, user_index]] = vote.value;
-        }
 
-        let mental_model = matrix_completion_svd(
-            observed_matrix.clone(),
-            completion_rank,
-            completion_tolerance,
-            completion_max_iterations,
-            None,
-        );
-        (observed_matrix, mental_model)
-    };
+    let observed_matrix_before = compute_observed_matrix(&votes_before, &item_ids, &user_ids);
+    let observed_matrix_after = compute_observed_matrix(&votes_after, &item_ids, &user_ids);
 
-    let (observed_matrix_after, mental_model_after) = {
-        let votes = votes_after;
-        let mut observed_matrix: Array2<f64> =
-            Array2::from_elem((item_ids.len(), user_ids.len()), f64::NAN);
-        for vote in votes {
-            let item_index = *item_ids.get(&vote.item_id).unwrap();
-            let user_index = *user_ids.get(&vote.user_id).unwrap();
-            observed_matrix[[item_index, user_index]] = vote.value;
-        }
-        let mental_model = matrix_completion_svd(
-            observed_matrix.clone(),
-            completion_rank,
-            completion_tolerance,
-            completion_max_iterations,
-            Some(mental_model_before.clone()),
-        );
-        (observed_matrix, mental_model)
-    };
+    let mental_model_before = compute_mental_model(
+        &observed_matrix_before,
+        completion_rank,
+        completion_tolerance,
+        completion_max_iterations,
+        None,
+    );
+
+    let mental_model_after = compute_mental_model(
+        &observed_matrix_after,
+        completion_rank,
+        completion_tolerance,
+        completion_max_iterations,
+        Some(&mental_model_before),
+    );
 
     let top = 50.min(item_ids.len());
     println!("Observed matrix before voting:");
@@ -239,4 +220,37 @@ fn root_mean_square_error(matrix1: &Array2<f64>, matrix2: &Array2<f64>) -> f64 {
         .and(matrix2)
         .fold(0.0, |acc, &a, &b| acc + (a - b).powi(2));
     (diff / (matrix1.len() as f64)).sqrt()
+}
+
+fn compute_observed_matrix(
+    votes: &[Vote],
+    item_ids: &FxHashMap<i64, usize>,
+    user_ids: &FxHashMap<String, usize>,
+) -> Array2<f64> {
+    let mut observed_matrix: Array2<f64> =
+        Array2::from_elem((item_ids.len(), user_ids.len()), f64::NAN);
+
+    for vote in votes {
+        let item_index = *item_ids.get(&vote.item_id).unwrap();
+        let user_index = *user_ids.get(&vote.user_id).unwrap();
+        observed_matrix[[item_index, user_index]] = vote.value;
+    }
+
+    observed_matrix
+}
+
+fn compute_mental_model(
+    observed_matrix: &Array2<f64>,
+    completion_rank: usize,
+    completion_tolerance: f64,
+    completion_max_iterations: usize,
+    initial_guess: Option<&Array2<f64>>,
+) -> Array2<f64> {
+    matrix_completion_svd(
+        observed_matrix.clone(),
+        completion_rank,
+        completion_tolerance,
+        completion_max_iterations,
+        initial_guess.cloned(),
+    )
 }
