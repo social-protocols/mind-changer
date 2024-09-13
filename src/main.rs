@@ -30,10 +30,10 @@ struct Vote {
     value: f64,
 }
 
-const CONTEXT_SIZE: i32 = 500;
+const CONTEXT_SIZE: i32 = 20; // other votes from user before and after voting on target post
 const COMPLETION_RANK: usize = 4;
 const COMPLETION_TOLERANCE: f64 = 0.001;
-const COMPLETION_MAX_ITERATIONS: usize = 500; // LIMIT MAX_ITERATIONS TO 2 FOR DEBUGGING
+const COMPLETION_MAX_ITERATIONS: usize = 500;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let conn = Connection::open("dataset/ratings.db")?;
