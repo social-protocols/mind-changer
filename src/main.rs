@@ -39,6 +39,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let conn = Connection::open("dataset/ratings.db")?;
 
     conn.execute("delete from scores", ())?;
+    conn.execute("delete from user_change", ())?;
     //  where noteId = '1400247230330667008'
     let mut stmt_note_ids = conn.prepare("select distinct noteId from ratings")?;
     let item_count: i64 = conn
@@ -167,7 +168,7 @@ fn process_item(item_id: &str, conn: &Connection) -> Result<(), Box<dyn Error>> 
         (votes_after.len() as f64) / (item_ids.len() as f64 * user_ids.len() as f64)
     );
 
-    if item_ids.len() < 3 || user_ids.len() < 3 || votes_before.len() == 0 || votes_after.len() == 0
+    if item_ids.len() < 2 || user_ids.len() < 2 || votes_before.len() == 0 || votes_after.len() == 0
     {
         println!("skipping");
         return Ok(());
@@ -260,8 +261,8 @@ fn process_item(item_id: &str, conn: &Connection) -> Result<(), Box<dyn Error>> 
     let mind_change = rmse / 2.0;
     println!("average mind change: {}", mind_change);
     conn.execute(
-        "insert or replace into scores (noteId, change) values (?1, ?2)",
-        (item_id, mind_change),
+        "insert or replace into scores (noteId, change, users, items, before, after) values (?1, ?2, ?3, ?4, ?5, ?6)",
+        (item_id, mind_change, user_ids.len(), item_ids.len(), votes_before.len(), votes_after.len()),
     )?;
     Ok(())
 }

@@ -50,7 +50,11 @@ CREATE TABLE ratings (
 
 create table scores (
   noteid integer primary key,
-  change real not null
+  change real not null,
+  users integer not null,
+  items integer not null,
+  before integer not null,
+  after integer not null
 ) strict;
 
 create table user_change (
