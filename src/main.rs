@@ -9,7 +9,7 @@ use ndarray::{s, Array2, Axis, Zip};
 use std::f64;
 
 use crate::print_array::print_array;
-use rusqlite::{params, Connection, Result};
+use rusqlite::{params, Connection, Result, Statement};
 use rustc_hash::FxHashMap;
 
 #[derive(Debug)]
@@ -30,10 +30,10 @@ struct Vote {
     value: f64,
 }
 
-const CONTEXT_SIZE: i32 = 20; // other votes from user before and after voting on target post
+const CONTEXT_SIZE: i32 = 8; // other votes from user before and after voting on target post
 const COMPLETION_ENERGY_THRESHOLD: f64 = 0.99; // for adaptive rank selection
-const COMPLETION_TOLERANCE: f64 = 0.01;
-const COMPLETION_MAX_ITERATIONS: usize = 300;
+const COMPLETION_TOLERANCE: f64 = 0.0001;
+const COMPLETION_MAX_ITERATIONS: usize = 2000;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let conn = Connection::open("dataset/ratings.db")?;
@@ -42,10 +42,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     conn.execute("delete from user_change", ())?;
     //  where noteId = '1400247230330667008'
     //   where noteId = '1354864556552712194'
-    let mut stmt_note_ids = conn.prepare("select distinct noteId from ratings")?;
+    let mut stmt_note_ids =
+        conn.prepare("select distinct noteId from ratings where noteId = '1354864556552712194'")?;
     let item_count: i64 = conn
         .prepare("select count(distinct noteId) from ratings")?
-        .query_map(params![], |row| Ok(row.get::<_, i64>(0)?))?
+        .query_map(params![], |row| row.get::<_, i64>(0))?
         .next()
         .unwrap()?;
     let item_iter = stmt_note_ids.query_map(params![], |row| {
@@ -56,9 +57,6 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     for (i, item) in item_iter.enumerate() {
         let item = item?;
-        // let item = Item {
-        //     id: 1360871260054503427,
-        // };
         println!(
             "\n[Item {}/{} {:.4}%]",
             i,
@@ -74,9 +72,32 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn get_votes(
+    user_id: &str,
+    user_voted_at_millis: i64,
+    statement: &mut Statement,
+) -> Result<Vec<Vote>, Box<dyn Error>> {
+    Ok(statement
+        .query_map(
+            params![user_id, user_voted_at_millis, CONTEXT_SIZE],
+            |row| {
+                Ok(Vote {
+                    user_id: user_id.to_string(),
+                    item_id: row.get(0)?,
+                    value: match row.get::<_, String>(1)?.as_str() {
+                        "HELPFUL" => 1.0,
+                        "SOMEWHAT_HELPFUL" => 0.0,
+                        "NOT_HELPFUL" => -1.0,
+                        _ => panic!(),
+                    },
+                })
+            },
+        )?
+        .filter_map(Result::ok)
+        .collect())
+}
+
 fn process_item(item_id: &str, conn: &Connection) -> Result<(), Box<dyn Error>> {
-    let item_id = item_id;
-    let conn: &Connection = &conn;
     let context_size = CONTEXT_SIZE;
     let mut stmt_voters_on_note =
         conn.prepare("select raterParticipantId, createdAtMillis from ratings where noteId = ?1")?;
@@ -104,49 +125,30 @@ fn process_item(item_id: &str, conn: &Connection) -> Result<(), Box<dyn Error>> 
             user_ids.insert(user.id.clone(), user_ids.len());
         }
 
-        let vote_iter = stmt_votes_before.query_map(
-            params![user.id, user.voted_at_millis, context_size],
-            |row| {
-                Ok(Vote {
-                    user_id: user.id.clone(),
-                    item_id: row.get(0)?,
-                    value: match row.get::<_, String>(1)?.as_str() {
-                        "HELPFUL" => 1.0,
-                        "SOMEWHAT_HELPFUL" => 0.0,
-                        "NOT_HELPFUL" => -1.0,
-                        _ => panic!(),
-                    },
-                })
-            },
+        let votes = get_votes(
+            user.id.as_str(),
+            user.voted_at_millis,
+            &mut stmt_votes_before,
         )?;
-        for vote in vote_iter {
-            let vote = vote?;
+        println!("User {} votes before: {}", user.id, votes.len());
+        for vote in votes.iter() {
             if !item_ids.contains_key(&vote.item_id) {
-                item_ids.insert(vote.item_id.clone(), item_ids.len());
+                item_ids.insert(vote.item_id, item_ids.len());
             }
             votes_before.push(vote.clone());
         }
-        let vote_iter = stmt_votes_after.query_map(
-            params![user.id, user.voted_at_millis, context_size],
-            |row| {
-                Ok(Vote {
-                    user_id: user.id.clone(),
-                    item_id: row.get(0)?,
-                    value: match row.get::<_, String>(1)?.as_str() {
-                        "HELPFUL" => 1.0,
-                        "SOMEWHAT_HELPFUL" => 0.0,
-                        "NOT_HELPFUL" => -1.0,
-                        _ => panic!(),
-                    },
-                })
-            },
+
+        let votes = get_votes(
+            user.id.as_str(),
+            user.voted_at_millis,
+            &mut stmt_votes_after,
         )?;
-        for vote in vote_iter {
-            let vote = vote?;
+        println!("User {} votes after: {}", user.id, votes.len());
+        for vote in votes.iter() {
             if !item_ids.contains_key(&vote.item_id) {
-                item_ids.insert(vote.item_id.clone(), item_ids.len());
+                item_ids.insert(vote.item_id, item_ids.len());
             }
-            votes_after.push(vote);
+            votes_after.push(vote.clone());
         }
     }
 
@@ -169,7 +171,7 @@ fn process_item(item_id: &str, conn: &Connection) -> Result<(), Box<dyn Error>> 
         (votes_after.len() as f64) / (item_ids.len() as f64 * user_ids.len() as f64)
     );
 
-    if item_ids.len() < 2 || user_ids.len() < 2 || votes_before.len() == 0 || votes_after.len() == 0
+    if item_ids.len() < 2 || user_ids.len() < 2 || votes_before.is_empty() || votes_after.is_empty()
     {
         println!("skipping");
         return Ok(());
@@ -178,40 +180,50 @@ fn process_item(item_id: &str, conn: &Connection) -> Result<(), Box<dyn Error>> 
     let observed_matrix_before = compute_observed_matrix(&votes_before, &item_ids, &user_ids);
     let observed_matrix_after = compute_observed_matrix(&votes_after, &item_ids, &user_ids);
 
-    // just for initializing the guess.
-    let mental_model_after_tmp = {
-        let observed_matrix = &observed_matrix_after;
+    let complete_matrix = |observed_matrix, initial_guess| {
         matrix_completion_svd(
-            observed_matrix.clone(),
+            observed_matrix,
             COMPLETION_ENERGY_THRESHOLD,
             COMPLETION_TOLERANCE,
             COMPLETION_MAX_ITERATIONS,
-            None,
-        )
-    };
-    let mental_model_before = {
-        let observed_matrix = &observed_matrix_before;
-        let initial_guess = Some(&mental_model_after_tmp);
-        matrix_completion_svd(
-            observed_matrix.clone(),
-            COMPLETION_ENERGY_THRESHOLD,
-            COMPLETION_TOLERANCE,
-            COMPLETION_MAX_ITERATIONS,
-            initial_guess.cloned(),
+            initial_guess,
         )
     };
 
-    let mental_model_after = {
-        let observed_matrix = &observed_matrix_after;
-        let initial_guess = Some(&mental_model_before);
-        matrix_completion_svd(
-            observed_matrix.clone(),
-            COMPLETION_ENERGY_THRESHOLD,
-            COMPLETION_TOLERANCE,
-            COMPLETION_MAX_ITERATIONS,
-            initial_guess.cloned(),
-        )
-    };
+    // just for initializing the guess.
+    let mental_model_after_tmp = complete_matrix(observed_matrix_after.clone(), None);
+    let mental_model_before_tmp = complete_matrix(
+        observed_matrix_before.clone(),
+        Some(mental_model_after_tmp.clone()),
+    );
+
+    let mental_model_after = complete_matrix(
+        observed_matrix_after.clone(),
+        Some(mental_model_before_tmp.clone()),
+    );
+
+    let mental_model_before = complete_matrix(
+        observed_matrix_before.clone(),
+        Some(mental_model_after.clone()),
+    );
+
+    let mental_model_after2 = complete_matrix(
+        observed_matrix_after.clone(),
+        Some(mental_model_before.clone()),
+    );
+
+    println!(
+        "rmse before vs tmp: {}",
+        root_mean_square_error(&mental_model_before, &mental_model_before_tmp)
+    );
+    println!(
+        "rmse after  vs tmp: {}",
+        root_mean_square_error(&mental_model_after, &mental_model_after_tmp)
+    );
+    println!(
+        "rmse after2 vs tmp: {}",
+        root_mean_square_error(&mental_model_after2, &mental_model_after_tmp)
+    );
 
     let top = 5.min(item_ids.len());
     println!("Observed matrix before voting:");
