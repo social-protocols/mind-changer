@@ -1,6 +1,7 @@
 use ndarray::{s, Array1, Array2};
 use ndarray_linalg::SVD;
-use std::time::Instant;
+use std::io::Write;
+use std::{io::stdout, time::Instant};
 
 use crate::initial_guess::calculate_initial_guess;
 
@@ -68,10 +69,11 @@ pub fn matrix_completion_svd(
         // Check for convergence using Frobenius norm
         let matrix_difference = &completed_matrix - &previous_matrix;
         last_frobenius_norm_difference = matrix_difference.mapv(|x| x * x).sum().sqrt();
-        // println!(
-        //     "[{}] rank {}: {}",
-        //     iteration, adaptive_rank, last_frobenius_norm_difference
-        // );
+        print!(
+            "\rmatrix completion: [{:>4}] {:.10} (rank {})",
+            iteration, adaptive_rank, last_frobenius_norm_difference
+        );
+        stdout().flush().unwrap();
 
         if last_frobenius_norm_difference < convergence_tolerance {
             break;
@@ -79,10 +81,10 @@ pub fn matrix_completion_svd(
     }
 
     println!(
-        "matrix completion: {:?}, iterations: {}, last Frobenius norm difference: {}",
-        start_time.elapsed(),
+        "\rmatrix completion: [{:>4}] {:.10} in {:>6}ms",
         actual_iterations,
-        last_frobenius_norm_difference
+        last_frobenius_norm_difference,
+        start_time.elapsed().as_millis()
     );
     completed_matrix
 }
