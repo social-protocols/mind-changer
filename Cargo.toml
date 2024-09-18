@@ -4,10 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# burn = { version = "0.14.0", features = ["train", "ndarray"] }
+approx = "0.5.1"
+burn = { version = "0.14.0", features = ["autodiff", "ndarray"] }
 ndarray = "0.15"
 ndarray-linalg = { version = "0.16", features = ["openblas-static"] }
-rusqlite = { version = "0.32.1", features = ["bundled"] }
+rand = "0.8.5"
+rusqlite = { version = "0.31.0", features = ["bundled"] }
 rustc-hash = "2.0.0"
 serde = { version = "1.0.210", features = ["derive"] }
-

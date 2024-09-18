@@ -71,7 +71,7 @@ pub fn matrix_completion_svd(
         last_frobenius_norm_difference = matrix_difference.mapv(|x| x * x).sum().sqrt();
         print!(
             "\rmatrix completion: [{:>4}] {:.10} (rank {})",
-            iteration, adaptive_rank, last_frobenius_norm_difference
+            iteration, last_frobenius_norm_difference, adaptive_rank
         );
         stdout().flush().unwrap();
 

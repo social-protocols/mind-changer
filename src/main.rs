@@ -1,11 +1,17 @@
 use std::error::Error;
 
 mod initial_guess;
+mod matrix_completion_gd;
 mod matrix_completion_svd;
+mod matrix_factorization_als;
+mod matrix_factorization_svd;
 mod print_array;
 
-use crate::matrix_completion_svd::matrix_completion_svd;
-use ndarray::{s, Array2, Axis, Zip};
+use matrix_factorization_svd::matrix_factorization_svd;
+use ndarray::Array2;
+
+use ndarray::s;
+use ndarray_linalg::Norm;
 use std::f64;
 
 use crate::print_array::print_array;
@@ -30,10 +36,8 @@ struct Vote {
     value: f64,
 }
 
-const CONTEXT_SIZE: i32 = 8; // other votes from user before and after voting on target post
-const COMPLETION_ENERGY_THRESHOLD: f64 = 0.99; // for adaptive rank selection
-const COMPLETION_TOLERANCE: f64 = 0.0001;
-const COMPLETION_MAX_ITERATIONS: usize = 2000;
+const CONTEXT_SIZE: i32 = 30; // other votes from user before and after voting on target post
+const AGREE: bool = true;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let conn = Connection::open("dataset/ratings.db")?;
@@ -42,8 +46,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     conn.execute("delete from user_change", ())?;
     //  where noteId = '1400247230330667008'
     //   where noteId = '1354864556552712194'
+    // 10x133  where noteid = '1709553622751588430'
+    // 39x544  where noteid = '1354855204005453826'
     let mut stmt_note_ids =
-        conn.prepare("select distinct noteId from ratings where noteId = '1354864556552712194'")?;
+        conn.prepare("select distinct noteId from ratings where noteid = '1354855204005453826'")?;
+    println!("counting notes...");
     let item_count: i64 = conn
         .prepare("select count(distinct noteId) from ratings")?
         .query_map(params![], |row| row.get::<_, i64>(0))?
@@ -84,11 +91,15 @@ fn get_votes(
                 Ok(Vote {
                     user_id: user_id.to_string(),
                     item_id: row.get(0)?,
-                    value: match row.get::<_, String>(1)?.as_str() {
-                        "HELPFUL" => 1.0,
-                        "SOMEWHAT_HELPFUL" => 0.0,
-                        "NOT_HELPFUL" => -1.0,
-                        _ => panic!(),
+                    value: if AGREE {
+                        row.get(1)?
+                    } else {
+                        match row.get::<_, String>(1)?.as_str() {
+                            "HELPFUL" => 1.0,
+                            "SOMEWHAT_HELPFUL" => 0.0,
+                            "NOT_HELPFUL" => -1.0,
+                            _ => panic!(),
+                        }
                     },
                 })
             },
@@ -103,9 +114,11 @@ fn process_item(item_id: &str, conn: &Connection) -> Result<(), Box<dyn Error>> 
         conn.prepare("select raterParticipantId, createdAtMillis from ratings where noteId = ?1")?;
     // TODO: filter users/items with only one vote
     let mut stmt_votes_before =
-            conn.prepare("select noteId, helpfulnessLevel from ratings where raterParticipantId = ?1 and createdAtMillis < ?2 and helpfulnesslevel != '' order by createdAtMillis desc limit ?3;")?;
+            conn.prepare(if AGREE {
+        "select noteId, agree - disagree from ratings where raterParticipantId = ?1 and createdAtMillis < ?2 and agree + disagree != 0 order by createdAtMillis desc limit ?3;"
+        } else {"select noteId, helpfulnessLevel from ratings where raterParticipantId = ?1 and createdAtMillis < ?2 and helpfulnesslevel != '' order by createdAtMillis desc limit ?3;"})?;
     let mut stmt_votes_after =
-            conn.prepare("select noteId, helpfulnessLevel from ratings where raterParticipantId = ?1 and createdAtMillis > ?2 and helpfulnesslevel != '' order by createdAtMillis asc limit ?3;")?;
+            conn.prepare(if AGREE {"select noteId, agree - disagree from ratings where raterParticipantId = ?1 and createdAtMillis > ?2 and agree + disagree != 0 order by createdAtMillis asc limit ?3;"} else {"select noteId, helpfulnessLevel from ratings where raterParticipantId = ?1 and createdAtMillis > ?2 and helpfulnesslevel != '' order by createdAtMillis asc limit ?3;" })?;
 
     let user_iter = stmt_voters_on_note.query_map(params![item_id], |row| {
         Ok(User {
@@ -130,7 +143,7 @@ fn process_item(item_id: &str, conn: &Connection) -> Result<(), Box<dyn Error>> 
             user.voted_at_millis,
             &mut stmt_votes_before,
         )?;
-        println!("User {} votes before: {}", user.id, votes.len());
+        // println!("User {} votes before: {}", user.id, votes.len());
         for vote in votes.iter() {
             if !item_ids.contains_key(&vote.item_id) {
                 item_ids.insert(vote.item_id, item_ids.len());
@@ -143,7 +156,7 @@ fn process_item(item_id: &str, conn: &Connection) -> Result<(), Box<dyn Error>> 
             user.voted_at_millis,
             &mut stmt_votes_after,
         )?;
-        println!("User {} votes after: {}", user.id, votes.len());
+        // println!("User {} votes after: {}", user.id, votes.len());
         for vote in votes.iter() {
             if !item_ids.contains_key(&vote.item_id) {
                 item_ids.insert(vote.item_id, item_ids.len());
@@ -177,82 +190,45 @@ fn process_item(item_id: &str, conn: &Connection) -> Result<(), Box<dyn Error>> 
         return Ok(());
     }
 
-    let observed_matrix_before = compute_observed_matrix(&votes_before, &item_ids, &user_ids);
-    let observed_matrix_after = compute_observed_matrix(&votes_after, &item_ids, &user_ids);
+    let observed_matrix = {
+        // we treat every user as two different users. One before voting on the current item and
+        // one after voting. The columns of the observed matrix are interleaved, so that every user
+        // gets two columns.
+        let mut observed_matrix: Array2<f64> =
+            Array2::from_elem((item_ids.len(), user_ids.len() * 2), f64::NAN);
 
-    let complete_matrix = |observed_matrix, initial_guess| {
-        matrix_completion_svd(
-            observed_matrix,
-            COMPLETION_ENERGY_THRESHOLD,
-            COMPLETION_TOLERANCE,
-            COMPLETION_MAX_ITERATIONS,
-            initial_guess,
-        )
+        for vote in &votes_before {
+            let item_index = *item_ids.get(&vote.item_id).unwrap();
+            let user_index = *user_ids.get(&vote.user_id).unwrap();
+            observed_matrix[[item_index, user_index * 2]] = vote.value;
+        }
+        for vote in &votes_after {
+            let item_index = *item_ids.get(&vote.item_id).unwrap();
+            let user_index = *user_ids.get(&vote.user_id).unwrap();
+            observed_matrix[[item_index, user_index * 2 + 1]] = vote.value;
+        }
+
+        observed_matrix
     };
 
-    // just for initializing the guess.
-    let mental_model_after_tmp = complete_matrix(observed_matrix_after.clone(), None);
-    let mental_model_before_tmp = complete_matrix(
-        observed_matrix_before.clone(),
-        Some(mental_model_after_tmp.clone()),
+    let top = 30.min(item_ids.len());
+    println!("Observed matrix:");
+    print_array(&observed_matrix.slice(s![..top, ..]).to_owned());
+
+    let factorization = matrix_factorization_svd(
+        &observed_matrix,
+        Some(3),
+        Some(initial_guess(&observed_matrix)),
     );
+    let user_embeddings = factorization.vt.t();
+    assert!(user_embeddings.shape()[0] == user_ids.len() * 2);
+    let mental_model = factorization
+        .u
+        .dot(&Array2::from_diag(&factorization.s))
+        .dot(&factorization.vt);
 
-    let mental_model_after = complete_matrix(
-        observed_matrix_after.clone(),
-        Some(mental_model_before_tmp.clone()),
-    );
-
-    let mental_model_before = complete_matrix(
-        observed_matrix_before.clone(),
-        Some(mental_model_after.clone()),
-    );
-
-    let mental_model_after2 = complete_matrix(
-        observed_matrix_after.clone(),
-        Some(mental_model_before.clone()),
-    );
-
-    println!(
-        "rmse before vs tmp: {}",
-        root_mean_square_error(&mental_model_before, &mental_model_before_tmp)
-    );
-    println!(
-        "rmse after  vs tmp: {}",
-        root_mean_square_error(&mental_model_after, &mental_model_after_tmp)
-    );
-    println!(
-        "rmse after2 vs tmp: {}",
-        root_mean_square_error(&mental_model_after2, &mental_model_after_tmp)
-    );
-
-    let top = 5.min(item_ids.len());
-    println!("Observed matrix before voting:");
-    print_array(&observed_matrix_before.slice(s![..top, ..]).to_owned());
-
-    println!("Observed matrix after voting:");
-    print_array(&observed_matrix_after.slice(s![..top, ..]).to_owned());
-
-    println!("Mental model before:");
-    print_array(&mental_model_before.slice(s![..top, ..]).to_owned());
-    println!("Mental model after:");
-    print_array(&mental_model_after.slice(s![..top, ..]).to_owned());
-    println!("Mental model diff:");
-    let diff_matrix = mental_model_after.clone() - mental_model_before.clone();
-    print_array(&diff_matrix.slice(s![..top, ..]).to_owned());
-
-    // Calculate the sum of the absolute values of each column (user) in the difference matrix
-    let column_sums = diff_matrix.mapv(|x| x.abs()).sum_axis(Axis(0));
-
-    // Calculate the mean of the column sums per user
-    let mean_column_sum_per_user = column_sums / diff_matrix.nrows() as f64;
-
-    println!("Mean of column sums per user in the difference matrix:");
-    print_array(
-        &mean_column_sum_per_user
-            .clone()
-            .into_shape((1, user_ids.len()))
-            .unwrap(),
-    );
+    println!("Mental model:");
+    print_array(&mental_model.slice(s![..top, ..]).to_owned());
 
     // Create a reverse map for user_ids
     let reverse_user_ids: FxHashMap<usize, String> =
@@ -263,43 +239,59 @@ fn process_item(item_id: &str, conn: &Connection) -> Result<(), Box<dyn Error>> 
         "INSERT OR REPLACE INTO user_change (noteid, userid, change) VALUES (?1, ?2, ?3)",
     )?;
 
-    // Loop over mean_column_sum_per_user and insert into database
-    for (index, &change) in mean_column_sum_per_user.iter().enumerate() {
-        let user_id = reverse_user_ids.get(&index).unwrap();
-        stmt.execute(params![item_id, user_id, change])?;
+    let mut change_magnitude_sum = 0.0;
+    for user_index in 0..user_ids.len() {
+        // interleaved users x K
+        let embedding_before = user_embeddings.row(user_index * 2);
+        let embedding_after = user_embeddings.row(user_index * 2 + 1);
+        println!("user {} embedding before {}", user_index, embedding_before);
+        println!("user {} embedding after {}", user_index, embedding_after);
+        let change_vector = embedding_after.to_owned() - embedding_before.to_owned();
+        println!("user {} change vector {}", user_index, change_vector);
+        let change_magnitude = change_vector.norm_l2();
+        change_magnitude_sum += change_magnitude;
+        println!(
+            "user {} change magnitude {}\n",
+            user_index, change_magnitude
+        );
+        // TODO: save item with largest change
+        let user_id = reverse_user_ids.get(&user_index).unwrap();
+        stmt.execute(params![item_id, user_id, change_magnitude])?;
     }
 
-    let rmse = root_mean_square_error(&mental_model_before, &mental_model_after); // range is from 0 to 2
+    let change_magnitude_avg = change_magnitude_sum / user_ids.len() as f64;
 
-    let mind_change = rmse / 2.0;
-    println!("average mind change: {}", mind_change);
+    println!("average mind change: {}", change_magnitude_avg);
     conn.execute(
-        "insert or replace into scores (noteId, change, users, items, before, after) values (?1, ?2, ?3, ?4, ?5, ?6)",
-        (item_id, mind_change, user_ids.len(), item_ids.len(), votes_before.len(), votes_after.len()),
-    )?;
+    "insert or replace into scores (noteId, change, users, items, before, after) values (?1, ?2, ?3, ?4, ?5, ?6)",
+    (item_id, change_magnitude_avg, user_ids.len(), item_ids.len(), votes_before.len(), votes_after.len()),
+)?;
+
     Ok(())
 }
 
-fn root_mean_square_error(matrix1: &Array2<f64>, matrix2: &Array2<f64>) -> f64 {
-    let diff = Zip::from(matrix1)
-        .and(matrix2)
-        .fold(0.0, |acc, &a, &b| acc + (a - b).powi(2));
-    (diff / (matrix1.len() as f64)).sqrt()
-}
+fn initial_guess(incomplete_matrix: &Array2<f64>) -> Array2<f64> {
+    let (rows, _) = incomplete_matrix.dim();
 
-fn compute_observed_matrix(
-    votes: &[Vote],
-    item_ids: &FxHashMap<i64, usize>,
-    user_ids: &FxHashMap<String, usize>,
-) -> Array2<f64> {
-    let mut observed_matrix: Array2<f64> =
-        Array2::from_elem((item_ids.len(), user_ids.len()), f64::NAN);
+    let row_averages: Vec<f64> = (0..rows)
+        .map(|i| {
+            let row = incomplete_matrix.row(i);
+            let known_values: Vec<f64> = row.iter().filter(|&&x| !x.is_nan()).cloned().collect();
+            known_values.iter().sum::<f64>() / known_values.len() as f64
+        })
+        .collect();
 
-    for vote in votes {
-        let item_index = *item_ids.get(&vote.item_id).unwrap();
-        let user_index = *user_ids.get(&vote.user_id).unwrap();
-        observed_matrix[[item_index, user_index]] = vote.value;
+    let mut completed_matrix = incomplete_matrix.clone();
+    for ((i, j), value) in completed_matrix.indexed_iter_mut() {
+        if value.is_nan() {
+            let other_j = if j % 2 == 0 { j + 1 } else { j - 1 };
+            let other_value = incomplete_matrix[[i, other_j]];
+            *value = if other_value.is_nan() {
+                row_averages[i]
+            } else {
+                other_value
+            };
+        }
     }
-
-    observed_matrix
+    completed_matrix
 }
