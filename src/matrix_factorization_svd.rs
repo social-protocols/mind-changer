@@ -7,7 +7,7 @@ use std::{io::stdout, time::Instant};
 const ENERGY_THRESHOLD: f64 = 0.995; // for adaptive rank selection
 const MIN_RANK: usize = 2;
 const CONVERGENCE_TOLERANCE: f64 = 1e-3;
-const MAX_ITERATIONS: usize = 1000;
+const MAX_ITERATIONS: usize = 100;
 
 pub struct Factorization {
     pub u: Array2<f64>,

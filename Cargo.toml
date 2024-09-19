@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 approx = "0.5.1"
 burn = { version = "0.14.0", features = ["autodiff", "ndarray"] }
+itertools = "0.13.0"
 ndarray = "0.15"
 ndarray-linalg = { version = "0.16", features = ["openblas-static"] }
 rand = "0.8.5"
