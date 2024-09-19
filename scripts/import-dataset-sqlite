@@ -48,6 +48,32 @@ CREATE TABLE ratings (
     ratedOnTweetId INTEGER
 ) strict;
 
+CREATE TABLE notes (
+    noteId integer PRIMARY KEY,
+    noteAuthorParticipantId TEXT,
+    createdAtMillis INTEGER,
+    tweetId integer,
+    classification TEXT,
+    believable TEXT,
+    harmful TEXT,
+    validationDifficulty TEXT,
+    misleadingOther INTEGER,
+    misleadingFactualError INTEGER,
+    misleadingManipulatedMedia INTEGER,
+    misleadingOutdatedInformation INTEGER,
+    misleadingMissingImportantContext INTEGER,
+    misleadingUnverifiedClaimAsFact INTEGER,
+    misleadingSatire INTEGER,
+    notMisleadingOther INTEGER,
+    notMisleadingFactuallyCorrect INTEGER,
+    notMisleadingOutdatedButNotWhenWritten INTEGER,
+    notMisleadingClearlySatire INTEGER,
+    notMisleadingPersonalOpinion INTEGER,
+    trustworthySources TEXT,
+    summary TEXT,
+    isMediaNote TEXT
+) strict;
+
 create table scores (
   noteid integer primary key,
   change real not null,
@@ -66,10 +92,17 @@ create table user_change (
 EOF
 )
 
-SQL_IMPORT=$(
+RATINGS_SQL_IMPORT=$(
 	cat <<EOF
 .mode tabs
 .import --skip 1 /dev/stdin ratings
+EOF
+)
+
+NOTES_SQL_IMPORT=$(
+	cat <<EOF
+.mode tabs
+.import --skip 1 /dev/stdin notes
 EOF
 )
 
@@ -85,25 +118,24 @@ CREATE INDEX ratings_idx_createdAtMillis ON ratings(createdAtMillis);
 SELECT 'optimize...';
 ANALYZE;
 PRAGMA optimize;
-SELECT 'vacuum...';
-VACUUM;
 ;
 EOF
 )
 
-echo "importing will temporally use ~40GB disk space and produce a 22GB sqlite file."
+echo "importing will produce a ~22GB sqlite file."
 echo "$SQL_TABLES" | sqlite3 "$SQLITEDB" --init /dev/null
 # Import data using pv to show progress
-pv ratings-00000.tsv | sqlite3 "$SQLITEDB" --init <(echo "$SQL_IMPORT")
-pv ratings-00001.tsv | sqlite3 "$SQLITEDB" --init <(echo "$SQL_IMPORT")
-pv ratings-00002.tsv | sqlite3 "$SQLITEDB" --init <(echo "$SQL_IMPORT")
-pv ratings-00003.tsv | sqlite3 "$SQLITEDB" --init <(echo "$SQL_IMPORT")
-pv ratings-00004.tsv | sqlite3 "$SQLITEDB" --init <(echo "$SQL_IMPORT")
-pv ratings-00005.tsv | sqlite3 "$SQLITEDB" --init <(echo "$SQL_IMPORT")
-pv ratings-00006.tsv | sqlite3 "$SQLITEDB" --init <(echo "$SQL_IMPORT")
-pv ratings-00007.tsv | sqlite3 "$SQLITEDB" --init <(echo "$SQL_IMPORT")
-pv ratings-00008.tsv | sqlite3 "$SQLITEDB" --init <(echo "$SQL_IMPORT")
-pv ratings-00009.tsv | sqlite3 "$SQLITEDB" --init <(echo "$SQL_IMPORT")
+pv ratings-00000.tsv | sqlite3 "$SQLITEDB" --init <(echo "$RATINGS_SQL_IMPORT")
+pv ratings-00001.tsv | sqlite3 "$SQLITEDB" --init <(echo "$RATINGS_SQL_IMPORT")
+pv ratings-00002.tsv | sqlite3 "$SQLITEDB" --init <(echo "$RATINGS_SQL_IMPORT")
+pv ratings-00003.tsv | sqlite3 "$SQLITEDB" --init <(echo "$RATINGS_SQL_IMPORT")
+pv ratings-00004.tsv | sqlite3 "$SQLITEDB" --init <(echo "$RATINGS_SQL_IMPORT")
+pv ratings-00005.tsv | sqlite3 "$SQLITEDB" --init <(echo "$RATINGS_SQL_IMPORT")
+pv ratings-00006.tsv | sqlite3 "$SQLITEDB" --init <(echo "$RATINGS_SQL_IMPORT")
+pv ratings-00007.tsv | sqlite3 "$SQLITEDB" --init <(echo "$RATINGS_SQL_IMPORT")
+pv ratings-00008.tsv | sqlite3 "$SQLITEDB" --init <(echo "$RATINGS_SQL_IMPORT")
+pv ratings-00009.tsv | sqlite3 "$SQLITEDB" --init <(echo "$RATINGS_SQL_IMPORT")
+pv notes-00000.tsv | sqlite3 "$SQLITEDB" --init <(echo "$NOTES_SQL_IMPORT")
 echo "$SQL_FINISH" | sqlite3 "$SQLITEDB" --init /dev/null
 
 # Verify the import
