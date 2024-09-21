@@ -111,7 +111,7 @@ SQL_FINISH=$(
 .headers off
 
 SELECT 'creating indexes...';
-CREATE INDEX ratings_idx_raterParticipantId ON ratings(raterParticipantId);
+CREATE INDEX ratings_idx_raterParticipantId_createdAtMillis ON ratings(raterParticipantId, createdAtMillis);
 CREATE INDEX ratings_idx_noteId ON ratings(noteId);
 CREATE INDEX ratings_idx_createdAtMillis ON ratings(createdAtMillis);
 

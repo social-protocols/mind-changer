@@ -4,10 +4,8 @@ use std::io::Write;
 use std::{io::stdout, time::Instant};
 
 // Hyperparameters
-const ENERGY_THRESHOLD: f64 = 0.995; // for adaptive rank selection
-const MIN_RANK: usize = 2;
 const CONVERGENCE_TOLERANCE: f64 = 1e-3;
-const MAX_ITERATIONS: usize = 100;
+const MAX_ITERATIONS: usize = 300;
 
 pub struct Factorization {
     pub u: Array2<f64>,
@@ -18,42 +16,40 @@ pub struct Factorization {
 
 pub fn matrix_factorization_svd(
     incomplete_matrix: &Array2<f64>,
-    fixed_rank: Option<usize>,
+    rank: usize,
     initial_guess: Option<Array2<f64>>,
 ) -> Factorization {
     let start_time = Instant::now();
 
-    // Initialize the matrix to be completed
     let mut completed_matrix = initial_guess.unwrap_or_else(|| {
         Array2::from_elem(incomplete_matrix.dim(), observed_mean(incomplete_matrix))
     });
 
     let mut actual_iterations = 0;
     let mut last_frobenius_norm_difference = 0.0;
-    let mut last_k = 1;
+    let mut last_rmse = 0.0;
+    let mut final_svd = None;
 
     for iteration in 0..MAX_ITERATIONS {
         actual_iterations = iteration + 1;
 
-        // Perform SVD on the current completed matrix
         let svd = completed_matrix.svd(true, true).unwrap();
-        let (left_singular_vectors, singular_values, right_singular_vectors_t) =
-            (svd.0.unwrap(), svd.1, svd.2.unwrap());
+        let (u, s, vt) = (svd.0.unwrap(), svd.1, svd.2.unwrap());
 
-        // adaptive rank selection
-        let k: usize = fixed_rank.unwrap_or_else(|| {
-            calculate_rank_from_singular_values(&singular_values, ENERGY_THRESHOLD).max(MIN_RANK)
-        });
-        last_k = k;
-
-        // Store the current matrix for comparison
         let previous_matrix = completed_matrix.clone();
 
-        // Compute the low-rank approximation
-        completed_matrix = left_singular_vectors
-            .slice(s![.., ..k])
-            .dot(&Array2::from_diag(&singular_values.slice(s![..k])))
-            .dot(&right_singular_vectors_t.slice(s![..k, ..]));
+        completed_matrix = u.slice(s![.., ..rank])
+            .dot(&Array2::from_diag(&s.slice(s![..rank])))
+            .dot(&vt.slice(s![..rank, ..]));
+
+        // Calculate RMSE for observed values
+        let (sum_squared_error, count) = incomplete_matrix.indexed_iter()
+            .filter(|(_, &val)| !val.is_nan())
+            .fold((0.0, 0), |(sum, count), ((i, j), &original_value)| {
+                let error = original_value - completed_matrix[[i, j]];
+                (sum + error * error, count + 1)
+            });
+        last_rmse = (sum_squared_error / count as f64).sqrt();
 
         // Update only the missing values in the original matrix
         completed_matrix.zip_mut_with(incomplete_matrix, |completed_value, &original_value| {
@@ -62,40 +58,38 @@ pub fn matrix_factorization_svd(
             }
         });
 
-        // Check for convergence using Frobenius norm
-        let matrix_difference = &completed_matrix - &previous_matrix;
-        last_frobenius_norm_difference = matrix_difference.mapv(|x| x * x).sum().sqrt();
+        last_frobenius_norm_difference = (&completed_matrix - &previous_matrix).mapv(|x| x * x).sum().sqrt();
+        
         print!(
-            "\rmatrix factorization: [{:>4}] {:.10} (rank {})",
-            iteration, last_frobenius_norm_difference, k
+            "\rmatrix factorization: [{:>4}/{}] Frobenius: {:.10}, RMSE: {:.10} (rank {})",
+            iteration, MAX_ITERATIONS, last_frobenius_norm_difference, last_rmse, rank
         );
         stdout().flush().unwrap();
+
+        final_svd = Some((u, s, vt));
 
         if last_frobenius_norm_difference < CONVERGENCE_TOLERANCE {
             break;
         }
     }
 
-    let k = last_k;
-
     println!(
-        "\rmatrix factorization: [{:>4}] {:.10} (rank {}) in {:>6}ms",
+        "\rmatrix factorization: [{:>4}/{}] Frobenius: {:.10}, RMSE: {:.10} (rank {}) in {:>6}ms",
         actual_iterations,
+        MAX_ITERATIONS,
         last_frobenius_norm_difference,
-        k,
+        last_rmse,
+        rank,
         start_time.elapsed().as_millis()
     );
 
-    // Perform final SVD to get the factorization
-    let svd = completed_matrix.svd(true, true).unwrap();
-    let (u, s, vt) = (svd.0.unwrap(), svd.1, svd.2.unwrap());
+    let (u, s, vt) = final_svd.unwrap();
 
-    // Return only the top k factors
     Factorization {
-        u: u.slice(s![.., ..k]).to_owned(),
-        s: s.slice(s![..k]).to_owned(),
-        vt: vt.slice(s![..k, ..]).to_owned(),
-        k: last_k,
+        u: u.slice(s![.., ..rank]).to_owned(),
+        s: s.slice(s![..rank]).to_owned(),
+        vt: vt.slice(s![..rank, ..]).to_owned(),
+        k: rank,
     }
 }
 
@@ -136,7 +130,7 @@ mod tests {
             [f64::NAN, 8.0, 9.0],
         ]);
 
-        let factorization = matrix_factorization_svd(&incomplete_matrix, None, None);
+        let factorization = matrix_factorization_svd(&incomplete_matrix, 2, None);
 
         assert_eq!(factorization.u.shape(), &[3, factorization.k]);
         assert_eq!(factorization.s.shape(), &[factorization.k]);
