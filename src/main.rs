@@ -9,8 +9,9 @@ mod matrix_factorization_als;
 mod matrix_factorization_svd;
 mod print_array;
 
+use discorec::Dataset;
+use discorec::RecommenderBuilder;
 use itertools::Itertools;
-use matrix_factorization_svd::matrix_factorization_svd;
 use ndarray::{Array1, Array2};
 
 use ndarray::s;
@@ -19,17 +20,20 @@ use ndarray_linalg::Norm;
 use std::f64;
 
 use crate::print_array::print_array;
+use crate::print_array::print_array32;
 use rusqlite::{params, Connection, Result, Statement};
 use rustc_hash::FxHashMap;
 
 // TODO: after one item changed someone's mind, other items which the user voted on right ifter
 // have a similar context signature. How do we figure out which item actually changed the mind, so that no change is detected for the other items. Can we look at the target items in chronological order and detect patterns?
-const MAX_CONTEXT_SIZE: i32 = 3; // other votes from user before and after voting on target post
-const AGREE: bool = false;
-const MAX_ITEMS: usize = 10;
-const MIN_VOTERS_PER_TARGET_ITEM: usize = 2;
-const CONTEXT_MATRIX_FACTORIZATION_RANK: usize = 5;
-const CHANGE_MATRIX_FACTORIZATION_RANK: usize = 5;
+const AGREE: bool = true; // agree or helpfulnessLevel
+const MAX_TARGET_ITEMS: usize = 1000;
+const MAX_CONTEXT_SIZE: usize = 20; // other votes from user before and after voting on target post
+const MIN_USERS_VOTED_ON_TARGET_ITEM: usize = 6;
+const MAX_USERS_VOTED_ON_TARGET_ITEM: usize = 6;
+const MIN_CONTEXT_VOTES_BEFORE_AND_AFTER: usize = 10;
+const CONTEXT_MATRIX_FACTORIZATION_RANK: usize = 50;
+const CHANGE_MATRIX_FACTORIZATION_RANK: usize = 50;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let conn = Connection::open("dataset/ratings.db")?;
@@ -41,7 +45,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // 10x133  where noteid = '1709553622751588430'
     // 39x544  where noteid = '1354855204005453826'
     let mut stmt_target_note_ids =
-        conn.prepare("select distinct noteId, summary from ratings join notes using(noteId) order by noteId desc limit 1000000 offset 100")?;
+        conn.prepare("select distinct noteId, summary from ratings join notes using(noteId) order by noteId asc limit 1000000 offset 1000")?;
     let mut stmt_voters_on_note =
         conn.prepare("select raterParticipantId, createdAtMillis from ratings where noteId = ?1")?;
     let mut stmt_note_text = conn.prepare("select summary from notes where noteId = ?1")?;
@@ -68,6 +72,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // virtual_user, context_item_id -> vote value
     let mut votes_by_virtual_users: HashMap<(VirtualUser, i64), f64, rustc_hash::FxBuildHasher> =
         FxHashMap::default();
+    let mut data = Dataset::new();
 
     // track item_id mappings for the context matrix
     let mut context_item_idx: HashMap<i64, usize, rustc_hash::FxBuildHasher> = FxHashMap::default();
@@ -91,102 +96,112 @@ fn main() -> Result<(), Box<dyn Error>> {
         })?
         .filter_map(Result::ok);
 
-    let mut i = 0;
+    let mut usable_target_item_count = 0;
     for target_item in target_item_candidate_ids_iter {
-        if (i + 1) > MAX_ITEMS {
+        if (usable_target_item_count + 1) > MAX_TARGET_ITEMS {
             break;
         }
         println!(
             "\n[Item {}/{} {:.4}%]",
-            i + 1,
-            MAX_ITEMS,
-            (i + 1) as f64 / MAX_ITEMS as f64 * 100.0
+            usable_target_item_count + 1,
+            MAX_TARGET_ITEMS,
+            (usable_target_item_count + 1) as f64 / MAX_TARGET_ITEMS as f64 * 100.0
         );
-        let target_item_id = target_item.id;
 
-        let mut context_votes_before: Vec<Vote> = vec![];
-        let mut context_votes_after: Vec<Vote> = vec![];
+        let mut context_votes_per_user: HashMap<
+            String,
+            (Vec<Vote>, Vec<Vote>),
+            rustc_hash::FxBuildHasher,
+        > = FxHashMap::default();
 
-        // for users and items in context, we only need the unique counts
-        let mut item_ids_in_context: HashSet<i64> = HashSet::new();
+        // for items in context, we only need the unique count
+        let mut context_item_ids: HashSet<i64> = HashSet::new();
 
-        let unique_voters_on_target_item: Vec<User> = stmt_voters_on_note
-            .query_map(params![target_item_id], |row| {
-                Ok(User {
-                    id: row.get(0)?,
-                    voted_at_millis: row.get(1)?,
-                })
-            })?
-            .filter_map(Result::ok)
-            .dedup_by(|u1, u2| u1.id == u2.id)
-            .collect();
+        {
+            let unique_voters_on_target_item: Vec<User> = stmt_voters_on_note
+                .query_map(params![target_item.id], |row| {
+                    Ok(User {
+                        id: row.get(0)?,
+                        voted_at_millis: row.get(1)?,
+                    })
+                })?
+                .filter_map(Result::ok)
+                .dedup_by(|u1, u2| u1.id == u2.id)
+                .collect();
 
-        println!("target item id: {}", target_item_id);
-        println!("text: {}", target_item.text);
+            println!("target item id: {}", target_item.id);
+            println!("text: {}", target_item.text);
+            println!(
+                "Number of unique users: {}",
+                unique_voters_on_target_item.len()
+            );
 
-        // for every user who voted on the target item
-        for user in unique_voters_on_target_item.iter() {
-            // votes on other items BEFORE voting on target item
-            let votes_before = get_votes(
-                user.id.as_str(),
-                user.voted_at_millis,
-                &mut stmt_votes_before,
-            )?;
+            // for every user who voted on the target item
+            for user in unique_voters_on_target_item
+                .iter()
+                .take(MAX_USERS_VOTED_ON_TARGET_ITEM)
+            {
+                // votes on other items BEFORE voting on target item
+                let votes_before = get_votes(
+                    user.id.as_str(),
+                    user.voted_at_millis,
+                    &mut stmt_votes_before,
+                )?;
 
-            // votes on other items AFTER voting on target item
-            let votes_after = get_votes(
-                user.id.as_str(),
-                user.voted_at_millis,
-                &mut stmt_votes_after,
-            )?;
+                // votes on other items AFTER voting on target item
+                let votes_after = get_votes(
+                    user.id.as_str(),
+                    user.voted_at_millis,
+                    &mut stmt_votes_after,
+                )?;
+                // println!(
+                //     "User {}, before: {}, after: {}",
+                //     user.id,
+                //     votes_before.len(),
+                //     votes_after.len()
+                // );
 
-            // Only process this user if they have both before and after votes
-            if !votes_before.is_empty() && !votes_after.is_empty() {
-                context_votes_before.extend(votes_before.iter().cloned());
-                context_votes_after.extend(votes_after.iter().cloned());
-
-                for vote in votes_before.iter().chain(votes_after.iter()) {
-                    item_ids_in_context.insert(vote.item_id);
+                // Only process this user if they have both before and after votes
+                if votes_before.len() >= MIN_CONTEXT_VOTES_BEFORE_AND_AFTER
+                    && votes_after.len() >= MIN_CONTEXT_VOTES_BEFORE_AND_AFTER
+                {
+                    for vote in votes_before.iter().chain(votes_after.iter()) {
+                        context_item_ids.insert(vote.item_id);
+                    }
+                    context_votes_per_user.insert(user.id.clone(), (votes_before, votes_after));
                 }
             }
-        }
 
-        println!("context size {}", MAX_CONTEXT_SIZE);
-        println!(
-            "Number of unique users: {}",
-            unique_voters_on_target_item.len()
-        );
-        println!("Number of unique items: {}", item_ids_in_context.len());
-        println!(
-            "items/user: {}",
-            item_ids_in_context.len() as f64 / unique_voters_on_target_item.len() as f64
-        );
-        println!("votes before: {}", context_votes_before.len());
-        println!("votes after:  {} ", context_votes_after.len());
+            println!("Number of unique items: {}", context_item_ids.len());
 
-        if item_ids_in_context.len() < 2
-            || unique_voters_on_target_item.len() < MIN_VOTERS_PER_TARGET_ITEM
-            || context_votes_before.is_empty()
-            || context_votes_after.is_empty()
-        {
-            println!("skipping");
-            continue;
-        }
-        i += 1;
+            let (total_context_votes_before, total_context_votes_after) = context_votes_per_user
+                .iter()
+                .fold((0, 0), |(sum_before, sum_after), (_, (before, after))| {
+                    (sum_before + before.len(), sum_after + after.len())
+                });
 
-        if !target_item_idx.contains_key(&target_item_id) {
-            target_item_idx.insert(target_item_id, target_item_idx.len());
-        }
-        for user in unique_voters_on_target_item.iter() {
-            if !user_idx.contains_key(&user.id) {
-                user_idx.insert(user.id.clone(), user_idx.len());
+            println!("total context votes before: {}", total_context_votes_before);
+            println!("total context votes after:  {} ", total_context_votes_after);
+
+            if context_item_ids.len() < 2
+                || unique_voters_on_target_item.len() < MIN_USERS_VOTED_ON_TARGET_ITEM
+                || total_context_votes_before == 0
+                || total_context_votes_after == 0
+            {
+                println!("skipping");
+                continue;
             }
+            usable_target_item_count += 1;
+        }
+
+        if !target_item_idx.contains_key(&target_item.id) {
+            target_item_idx.insert(target_item.id, target_item_idx.len());
         }
 
         let mut track_context_vote = |before: bool, vote: &Vote| {
             let virtual_user = VirtualUser {
+                target_item_id: target_item.id,
                 user_id: vote.user_id.clone(),
-                target_item_id,
                 before,
             };
 
@@ -196,21 +211,34 @@ fn main() -> Result<(), Box<dyn Error>> {
             if !context_item_idx.contains_key(&vote.item_id) {
                 context_item_idx.insert(vote.item_id, context_item_idx.len());
             }
-            votes_by_virtual_users.insert((virtual_user, vote.item_id), vote.value);
+            votes_by_virtual_users.insert((virtual_user.clone(), vote.item_id), vote.value);
+            data.push(virtual_user, vote.item_id, vote.value as f32);
         };
 
-        for context_vote_before in context_votes_before.iter() {
-            track_context_vote(true, context_vote_before);
-        }
-        for context_vote_after in context_votes_after.iter() {
-            track_context_vote(false, context_vote_after);
+        for (user_id, (context_votes_before, context_votes_after)) in context_votes_per_user.iter()
+        {
+            // println!(
+            //     "User {}, before: {}, after: {}",
+            //     user_id,
+            //     context_votes_before.len(),
+            //     context_votes_after.len()
+            // );
+            if !user_idx.contains_key(user_id) {
+                user_idx.insert(user_id.clone(), user_idx.len());
+            }
+            for context_vote_before in context_votes_before.iter() {
+                track_context_vote(true, context_vote_before);
+            }
+            for context_vote_after in context_votes_after.iter() {
+                track_context_vote(false, context_vote_after);
+            }
         }
     }
 
     println!("\nvirtual users: {}", virtual_user_idx.len());
-    println!("context items: {}", context_item_idx.len());
-    println!("unique users: {}", user_idx.len());
-    println!("target items: {}", target_item_idx.len());
+    println!("total context items: {}", context_item_idx.len());
+    println!("total unique users: {}", user_idx.len());
+    println!("total target items: {}", target_item_idx.len());
     assert!(
         virtual_user_idx.len() % 2 == 0,
         "virtual users must always come in pairs"
@@ -222,10 +250,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         &virtual_user_idx,
     );
 
-    let top = 30.min(context_item_idx.len());
-    let left = 60.min(context_item_idx.len());
-    println!("Observed matrix:");
-    print_array(&observed_context_matrix.slice(s![..top, ..left]).to_owned());
+    // for (v, i) in virtual_user_idx.iter().sorted_by_key(|(_, &i)| i) {
+    //     println!("{:>2}: {:?}", i, v);
+    // }
+
+    let top_context = 30.min(context_item_idx.len());
+    let left_context = 80.min(virtual_user_idx.len());
+    println!(
+        "Observed context matrix: {:?}",
+        observed_context_matrix.shape()
+    );
+    print_array(
+        &observed_context_matrix
+            .slice(s![..top_context, ..left_context])
+            .to_owned(),
+    );
 
     // println!("guess:");
     // print_array(
@@ -234,35 +273,132 @@ fn main() -> Result<(), Box<dyn Error>> {
     //         .to_owned(),
     // );
 
-    let factorization = matrix_factorization_svd(
-        &observed_context_matrix,
-        CONTEXT_MATRIX_FACTORIZATION_RANK,
-        Some(initial_guess(&observed_context_matrix)),
-    );
-    let completed_context_matrix = factorization
-        .u
-        .dot(&Array2::from_diag(&factorization.s))
-        .dot(&factorization.vt);
+    let recommender = RecommenderBuilder::new()
+        .factors(CONTEXT_MATRIX_FACTORIZATION_RANK as u32)
+        .iterations(1000)
+        .fit_explicit(&data);
 
+    // for user_id in recommender.user_ids() {
+    //     let factors = recommender.user_factors(user_id);
+    //     println!("{:?}: {:?}", user_id, factors);
+    // }
+
+    let completed_context_matrix = {
+        let mut matrix: Array2<f32> =
+            Array2::from_elem((context_item_idx.len(), virtual_user_idx.len()), f32::NAN);
+
+        for virtual_user in recommender.user_ids() {
+            for item_id in recommender.item_ids() {
+                let context_item_index = *context_item_idx.get(item_id).unwrap();
+                let virtual_user_index = *virtual_user_idx.get(virtual_user).unwrap();
+
+                matrix[[context_item_index, virtual_user_index]] =
+                    recommender.predict(virtual_user, item_id);
+            }
+        }
+
+        matrix
+    };
+
+    // let factorization = matrix_factorization_svd(
+    //     &observed_context_matrix,
+    //     CONTEXT_MATRIX_FACTORIZATION_RANK,
+    //     Some(initial_guess(&observed_context_matrix)),
+    // );
+    // let completed_context_matrix = factorization
+    //     .u
+    //     .dot(&Array2::from_diag(&factorization.s))
+    //     .dot(&factorization.vt);
+    //
     println!("Completed context matrix:");
-    print_array(&completed_context_matrix.slice(s![..top, ..left]).to_owned());
+    print_array32(
+        &completed_context_matrix
+            .slice(s![..top_context, ..left_context])
+            .to_owned(),
+    );
+    println!("RMSE: {}", recommender.rmse(&data));
 
-    let virtual_user_embeddings = factorization.vt.t();
+    // let virtual_user_embeddings = factorization.vt.t();
 
-    // TODO: search virtual user with the biggest change, and show the texts of the before- and
-    // after votes, and the text of the target_item
+    // let change_matrix = calculate_change_matrix(
+    //     virtual_user_embeddings.to_owned(),
+    //     &virtual_user_idx,
+    //     &target_item_idx,
+    //     &user_idx,
+    // );
+    let (change_data, change_matrix) = {
+        let mut matrix: Array2<f32> =
+            Array2::from_elem((target_item_idx.len(), user_idx.len()), f32::NAN);
+        let mut change_data = Dataset::new();
 
-    let change_matrix = calculate_change_matrix(
-        virtual_user_embeddings.to_owned(),
-        &virtual_user_idx,
-        &target_item_idx,
-        &user_idx,
+        for (virtual_user_before, virtual_user_after) in virtual_user_idx.keys().tuple_windows() {
+            let embedding_before = Array1::from_vec(
+                recommender
+                    .user_factors(virtual_user_before)
+                    .unwrap()
+                    .to_vec(),
+            );
+            let embedding_after = Array1::from_vec(
+                recommender
+                    .user_factors(virtual_user_after)
+                    .unwrap()
+                    .to_vec(),
+            );
+            let change_vector = embedding_after.to_owned() - embedding_before.to_owned();
+            let change_magnitude = change_vector.norm_l2();
+            let target_item_index = target_item_idx[&virtual_user_before.target_item_id];
+            let user_index = user_idx[&virtual_user_before.user_id];
+            matrix[[target_item_index, user_index]] = change_magnitude;
+            change_data.push(
+                virtual_user_before.user_id.clone(),
+                virtual_user_before.target_item_id,
+                change_magnitude,
+            );
+        }
+        (change_data, matrix)
+    };
+
+    let top_change_matrix = 30.min(target_item_idx.len());
+    let left_change_matrix = 80.min(user_idx.len());
+    println!("change matrix:");
+    print_array32(
+        &change_matrix
+            .slice(s![..top_change_matrix, ..left_change_matrix])
+            .to_owned(),
     );
 
-    println!("Change matrix: {:?}", change_matrix.shape());
-    print_array(&(change_matrix.clone() * 5.0));
+    let change_recommender = RecommenderBuilder::new()
+        .factors(CHANGE_MATRIX_FACTORIZATION_RANK as u32)
+        .iterations(300)
+        .fit_explicit(&change_data);
 
-    let most_affected_user_by_target_item = find_most_affected_user_by_target_item(&change_matrix);
+    let change_matrix_completion = {
+        let mut matrix: Array2<f32> =
+            Array2::from_elem((target_item_idx.len(), user_idx.len()), f32::NAN);
+
+        for user_id in change_recommender.user_ids() {
+            let user_index = user_idx[user_id];
+            for target_item_id in change_recommender.item_ids() {
+                let target_item_index = target_item_idx[target_item_id];
+
+                matrix[[target_item_index, user_index]] =
+                    change_recommender.predict(user_id, target_item_id);
+            }
+        }
+
+        matrix
+    };
+    println!(
+        "change matrix completion: {:?}",
+        change_matrix_completion.shape()
+    );
+    print_array32(
+        &(change_matrix_completion.clone() * 0.1)
+            .slice(s![..top_change_matrix, ..left_change_matrix])
+            .to_owned(),
+    );
+
+    let most_affected_user_by_target_item = find_most_affected_user_per_target_item(&change_matrix);
     println!("most affected users: {}", most_affected_user_by_target_item);
 
     let reverse_user_ids: FxHashMap<usize, String> =
@@ -278,9 +414,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         let target_item_id: i64 = reverse_target_item_ids[&target_item_index];
         let user_id: String = reverse_user_ids[&user_index].clone();
         let target_item_text: String = note_text(target_item_id, &mut stmt_note_text)?;
-        let magnitude = change_matrix[[target_item_index, user_index]];
+        let magnitude = change_matrix_completion[[target_item_index, user_index]];
         // TODO: track highest magnitude
-        if magnitude < 0.25 {
+        if magnitude < 1.8 {
             continue;
         }
         println!(
@@ -310,7 +446,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         for pc in predicted_changes {
             println!(
-                " |{:.2}| {:>4.2} -> {:>4.2} \"{}\"",
+                " |{:.2}| {:>5.2} -> {:>5.2} \"{}\"",
                 pc.difference, pc.vote_before, pc.vote_after, pc.text
             );
         }
@@ -348,22 +484,22 @@ fn main() -> Result<(), Box<dyn Error>> {
         //     println!("after: {} on \"{}\"", vote, text);
         // }
     }
-
-    let change_matrix_factorization =
-        matrix_factorization_svd(&change_matrix, CHANGE_MATRIX_FACTORIZATION_RANK, None);
-    let change_matrix_completion = change_matrix_factorization
-        .u
-        .dot(&Array2::from_diag(&change_matrix_factorization.s))
-        .dot(&change_matrix_factorization.vt);
-
-    println!("change matrix completion:");
-    print_array(&(change_matrix_completion.clone() * 5.0));
-
-    // TODO: print item texts which changed users minds on the target item
-    // Prepare the SQL statement
-    let _stmt = conn.prepare(
-        "INSERT OR REPLACE INTO user_change (noteid, userid, change) VALUES (?1, ?2, ?3)",
-    )?;
+    //
+    // let change_matrix_factorization =
+    //     matrix_factorization_svd(&change_matrix, CHANGE_MATRIX_FACTORIZATION_RANK, None);
+    // let change_matrix_completion = change_matrix_factorization
+    //     .u
+    //     .dot(&Array2::from_diag(&change_matrix_factorization.s))
+    //     .dot(&change_matrix_factorization.vt);
+    //
+    // println!("change matrix completion:");
+    // print_array32(&change_matrix_completion));
+    //
+    // // TODO: print item texts which changed users minds on the target item
+    // // Prepare the SQL statement
+    // let _stmt = conn.prepare(
+    //     "INSERT OR REPLACE INTO user_change (noteid, userid, change) VALUES (?1, ?2, ?3)",
+    // )?;
 
     //     // TODO: save item with largest change
     //     let user_id = reverse_user_ids.get(&virtual_user_index).unwrap();
@@ -421,7 +557,7 @@ fn calculate_change_matrix(
     matrix
 }
 
-fn find_most_affected_user_by_target_item(change_matrix: &Array2<f64>) -> Array1<usize> {
+fn find_most_affected_user_per_target_item(change_matrix: &Array2<f32>) -> Array1<usize> {
     change_matrix.map_axis(Axis(1), |row| {
         row.to_vec()
             .iter()
@@ -432,7 +568,7 @@ fn find_most_affected_user_by_target_item(change_matrix: &Array2<f64>) -> Array1
 }
 
 fn analyze_predicted_vote_changes(
-    completed_context_matrix: &Array2<f64>,
+    completed_context_matrix: &Array2<f32>,
     virtual_user_before: &VirtualUser,
     virtual_user_after: &VirtualUser,
     virtual_user_idx: &HashMap<VirtualUser, usize, rustc_hash::FxBuildHasher>,
@@ -461,7 +597,7 @@ fn analyze_predicted_vote_changes(
         .collect();
 
     predicted_changes.sort_by(|a, b| b.difference.partial_cmp(&a.difference).unwrap());
-    Ok(predicted_changes.into_iter().take(10).collect())
+    Ok(predicted_changes.into_iter().take(3).collect())
 }
 
 fn get_votes(
@@ -493,32 +629,6 @@ fn get_votes(
         .collect())
 }
 
-fn initial_guess(incomplete_matrix: &Array2<f64>) -> Array2<f64> {
-    let (rows, _) = incomplete_matrix.dim();
-    let mut completed_matrix = incomplete_matrix.clone();
-
-    let row_averages: Vec<f64> = (0..rows)
-        .map(|i| {
-            let row = incomplete_matrix.row(i);
-            let known_values: Vec<f64> = row.iter().filter(|&&x| !x.is_nan()).cloned().collect();
-            known_values.iter().sum::<f64>() / known_values.len() as f64
-        })
-        .collect();
-
-    for ((i, j), value) in completed_matrix.indexed_iter_mut() {
-        if value.is_nan() {
-            let other_j = if j % 2 == 0 { j + 1 } else { j - 1 };
-            let other_value = incomplete_matrix[[i, other_j]];
-            *value = if other_value.is_nan() {
-                row_averages[i]
-            } else {
-                other_value
-            };
-        }
-    }
-    completed_matrix
-}
-
 fn note_text(note_id: i64, stmt_note_text: &mut Statement) -> Result<String, Box<dyn Error>> {
     stmt_note_text
         .query_map(params![note_id], |row| row.get(0))?
@@ -546,17 +656,17 @@ struct Vote {
     value: f64,
 }
 
-#[derive(Eq, PartialEq, Hash, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 struct VirtualUser {
-    user_id: String,
     target_item_id: i64,
+    user_id: String,
     before: bool,
 }
 
 #[derive(Debug)]
 struct PredictedVoteChange {
-    vote_before: f64,
-    vote_after: f64,
-    difference: f64,
+    vote_before: f32,
+    vote_after: f32,
+    difference: f32,
     text: String,
 }
